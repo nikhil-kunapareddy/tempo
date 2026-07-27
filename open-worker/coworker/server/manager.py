@@ -1479,17 +1479,10 @@ class SessionManager:
         except OSError:
             pass
 
-    # Suggestions for the OpenAI-compatible vendor providers (checked against vendor docs
-    # 2026-07-04; refresh alongside `recommended_model` in providers/registry.py).
-    COMPAT_MODELS = {
-        "zai": ["glm-5.2", "glm-4.6"],
-        "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
-        "kimi": ["kimi-k2.6", "kimi-k2.5"],
-        "minimax": ["MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M3"],
-        "qwen": ["qwen3-max", "qwen3-coder-plus", "qwen-plus"],
-        "xai": ["grok-4.3", "grok-4"],
-        "mistral": ["mistral-large-latest", "mistral-small-latest"],
-    }
+    # Extra bare-name suggestions for OpenAI-compatible providers beyond the curated
+    # matrix. Downsized build: Together's suggestions come from the matrix, so this is
+    # empty (kept as an extension point).
+    COMPAT_MODELS: dict[str, list[str]] = {}
 
     def _suggested_models(self, name: str) -> list[str]:
         """Bare model-name suggestions for the 'add model' form (datalist), per provider.

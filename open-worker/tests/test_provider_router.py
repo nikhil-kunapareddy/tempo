@@ -333,9 +333,9 @@ def test_manager_curated_models(tmp_path, monkeypatch):
     assert mgr.get_settings()["models"] == [mgr.model]
 
     # a provider key unlocks exactly that provider's matrix models
-    mgr.set_provider("anthropic", {"api_key": "sk-ant-test"})
+    mgr.set_provider("together", {"api_key": "tok-test"})
     models = mgr.get_settings()["models"]
-    assert "anthropic:claude-opus-4-8" in models
+    assert "together:zai-org/GLM-5.2" in models
     assert "gpt-4o" not in models  # no OpenAI seed anywhere
 
     added = mgr.add_model("ollama:qwen2.5-coder:32b")  # keyless provider → selectable
@@ -346,12 +346,12 @@ def test_manager_curated_models(tmp_path, monkeypatch):
     assert len(mgr.get_settings()["models"]) == n
 
     # removing a matrix model hides it persistently; re-adding unhides it
-    removed = mgr.remove_model("anthropic:claude-haiku-4-5")
-    assert "anthropic:claude-haiku-4-5" not in removed["models"]
+    removed = mgr.remove_model("together:moonshotai/Kimi-K2.6")
+    assert "together:moonshotai/Kimi-K2.6" not in removed["models"]
     mgr2 = SessionManager(data_dir=tmp_path)  # survives a restart
-    assert "anthropic:claude-haiku-4-5" not in mgr2.get_settings()["models"]
-    mgr.add_model("anthropic:claude-haiku-4-5")
-    assert "anthropic:claude-haiku-4-5" in mgr.get_settings()["models"]
+    assert "together:moonshotai/Kimi-K2.6" not in mgr2.get_settings()["models"]
+    mgr.add_model("together:moonshotai/Kimi-K2.6")
+    assert "together:moonshotai/Kimi-K2.6" in mgr.get_settings()["models"]
 
     # removing a custom id drops it
     mgr.remove_model("ollama:qwen2.5-coder:32b")
@@ -390,24 +390,13 @@ def test_set_provider_skips_recommended_when_not_pulled(tmp_path, monkeypatch):
 
 
 def test_provider_builders(monkeypatch):
-    import pytest
-
-    from coworker.providers import AnthropicProvider, GeminiProvider
+    from coworker.providers import OpenAIProvider
     from coworker.providers.registry import build_provider_client
 
-    # anthropic and gemini are native: key resolution deferred to first call
-    p = build_provider_client("anthropic", {"api_key": "sk-ant-x"}, None)
-    assert isinstance(p, AnthropicProvider) and p._api_key == "sk-ant-x"
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="Anthropic"):
-        build_provider_client("anthropic", {}, None)._ensure_client()
-
-    g = build_provider_client("gemini", {"api_key": "AIza-x"}, None)
-    assert isinstance(g, GeminiProvider) and g._api_key == "AIza-x"
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="Gemini"):
-        build_provider_client("gemini", {}, None)._ensure_client()
+    # together rides the OpenAI-compatible client pointed at Together's endpoint
+    t = build_provider_client("together", {"api_key": "tok-x"}, None)
+    assert isinstance(t, OpenAIProvider)
+    assert t._base_url == "https://api.together.xyz/v1"
 
     # OpenAI custom endpoint (Azure /openai/v1, OpenRouter, vLLM, …) passes through
     o = build_provider_client(
@@ -417,43 +406,9 @@ def test_provider_builders(monkeypatch):
     assert build_provider_client("openai", {}, None)._base_url is None
 
 
-def test_anthropic_gemini_capabilities():
-    for m in ("anthropic:claude-sonnet-4-6", "gemini:gemini-2.5-flash"):
-        caps = capabilities_for(m)
-        assert caps.tools is True and caps.vision is True and caps.streaming is True
-        assert caps.parallel_tool_calls is True  # both native: results fold correctly
-
-
-def test_anthropic_gemini_provider_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    from coworker.server.manager import SessionManager
-
-    mgr = SessionManager(data_dir=tmp_path)
-    provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["anthropic"]["configured"] is False
-    assert provs["gemini"]["needs_key"] is True
-    assert "claude-sonnet-4-6" in provs["anthropic"]["suggested_models"]
-    assert "gemini-2.5-flash" in provs["gemini"]["suggested_models"]
-
-    res = mgr.set_provider("anthropic", {"api_key": "sk-ant-test"})
-    assert res["ok"] is True and res["recommended_model"] == "claude-fable-5"
-    provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["anthropic"]["configured"] is True
-    assert "api_key" not in provs["anthropic"].get("values", {})  # secrets never leak
-    # the recommended model is auto-added to the curated list with its provider prefix
-    assert "anthropic:claude-fable-5" in mgr.get_settings()["models"]
-
-    # env var alone marks a provider configured
-    monkeypatch.setenv("GEMINI_API_KEY", "AIza-env")
-    provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["gemini"]["configured"] is True
-
-
 def test_first_configured_provider_wins_default(tmp_path, monkeypatch):
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+    for var in ("OPENAI_API_KEY", "TOGETHER_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     from coworker.server.manager import SessionManager
 
@@ -463,12 +418,8 @@ def test_first_configured_provider_wins_default(tmp_path, monkeypatch):
     )  # fresh install: built-in default, openai unconfigured
 
     # the first provider that gets a key takes over the default
-    mgr.set_provider("anthropic", {"api_key": "sk-ant-x"})
-    assert mgr.model == "anthropic:claude-fable-5"
-
-    # but a default that already works is never stolen by the next provider
-    mgr.set_provider("gemini", {"api_key": "AIza-x"})
-    assert mgr.model == "anthropic:claude-fable-5"
+    mgr.set_provider("together", {"api_key": "tok-x"})
+    assert mgr.model == "together:zai-org/GLM-5.2"
 
 
 def test_surface_visibility(tmp_path, monkeypatch):
@@ -503,7 +454,7 @@ def test_provider_suggested_models(tmp_path, monkeypatch):
 
     mgr = SessionManager(data_dir=tmp_path)
     provs = {p["name"]: p for p in mgr.get_providers()}
-    assert "gpt-5.5" in provs["openai"]["suggested_models"]
+    assert "zai-org/GLM-5.2" in provs["together"]["suggested_models"]
     # ollama suggestions are bare names (no `ollama:` prefix); empty when unconfigured
     sugg = provs["ollama"]["suggested_models"]
     assert isinstance(sugg, list)
@@ -517,11 +468,11 @@ def test_router_on_use_fires_with_provider_name():
     seen: list[str] = []
     router = ProviderRouter(on_use=seen.append)
     router._clients["openai"] = OpenAIProvider(client=_FakeOAClient(content="hi"))
-    router._clients["zai"] = OpenAIProvider(client=_FakeOAClient(content="hi"))
+    router._clients["together"] = OpenAIProvider(client=_FakeOAClient(content="hi"))
 
     router.complete(model="gpt-5.5", messages=[])
-    router.complete(model="zai:glm-5.2", messages=[])
-    assert seen == ["openai", "zai"]
+    router.complete(model="together:zai-org/GLM-5.2", messages=[])
+    assert seen == ["openai", "together"]
 
 
 def test_router_on_use_failures_never_break_the_call():
@@ -542,24 +493,24 @@ def test_manager_key_hygiene_stamps(tmp_path, monkeypatch):
     from coworker.server.manager import SessionManager
 
     mgr = SessionManager(data_dir=tmp_path)
-    mgr.set_provider("deepseek", {"api_key": "ds-key"})
+    mgr.set_provider("together", {"api_key": "ds-key"})
     provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["deepseek"]["configured"] is True
-    assert provs["deepseek"]["key_set_at"] == date.today().isoformat()
-    assert provs["deepseek"]["last_used_at"] is None  # configured but never used
+    assert provs["together"]["configured"] is True
+    assert provs["together"]["key_set_at"] == date.today().isoformat()
+    assert provs["together"]["last_used_at"] is None  # configured but never used
 
     # Endpoint-only re-save keeps the original stamp (the key wasn't touched).
-    mgr.set_provider("deepseek", {"base_url": "https://api.deepseek.com/v1"})
+    mgr.set_provider("together", {"base_url": "https://api.together.xyz/v1"})
     provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["deepseek"]["key_set_at"] == date.today().isoformat()
+    assert provs["together"]["key_set_at"] == date.today().isoformat()
 
-    mgr._note_provider_use("deepseek")
-    first = mgr._prefs["provider_last_used"]["deepseek"]
-    mgr._note_provider_use("deepseek")  # within the 60s throttle window → unchanged
-    assert mgr._prefs["provider_last_used"]["deepseek"] == first
+    mgr._note_provider_use("together")
+    first = mgr._prefs["provider_last_used"]["together"]
+    mgr._note_provider_use("together")  # within the 60s throttle window → unchanged
+    assert mgr._prefs["provider_last_used"]["together"] == first
     provs = {p["name"]: p for p in mgr.get_providers()}
-    assert provs["deepseek"]["last_used_at"] == first
+    assert provs["together"]["last_used_at"] == first
     # and it survives a reload (persisted to prefs.json)
     mgr2 = SessionManager(data_dir=tmp_path)
     provs2 = {p["name"]: p for p in mgr2.get_providers()}
-    assert provs2["deepseek"]["last_used_at"] == first
+    assert provs2["together"]["last_used_at"] == first

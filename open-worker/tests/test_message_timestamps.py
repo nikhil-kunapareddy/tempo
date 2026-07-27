@@ -112,31 +112,6 @@ def test_outbound_strip_is_unconditional(tmp_path):
     assert engine.messages[-1]["ts"] == 1700000000.0  # original untouched
 
 
-def _no_ts_keys(value) -> bool:
-    if isinstance(value, dict):
-        return all(k != "ts" and _no_ts_keys(v) for k, v in value.items())
-    if isinstance(value, list):
-        return all(_no_ts_keys(v) for v in value)
-    return True
-
-
-def test_provider_adapters_drop_ts():
-    """Defense in depth: the native Anthropic/Gemini payload builders rebuild messages
-    from role/content, so a `ts` that somehow slipped past the engine strip still never
-    reaches the wire."""
-    from coworker.providers.anthropic_provider import convert_messages as to_anthropic
-    from coworker.providers.gemini_provider import convert_messages as to_gemini
-
-    history = [
-        {"role": "system", "content": "be brief"},
-        {"role": "user", "content": "hi", "ts": 1700000000.0},
-        {"role": "assistant", "content": "hello", "ts": 1700000001.0},
-    ]
-    for convert in (to_anthropic, to_gemini):
-        _system, payload = convert(history)
-        assert _no_ts_keys(payload)
-
-
 def test_messages_endpoint_returns_ts(tmp_path):
     manager = SessionManager(
         workspace=tmp_path, provider=CapturingProvider([_text("hi there")])

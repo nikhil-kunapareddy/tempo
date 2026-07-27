@@ -278,16 +278,10 @@ def test_stream_accumulates_tool_calls():
     )
 
 
-# -- OpenAI-compatible vendor providers (Z AI, DeepSeek, Kimi, MiniMax, Qwen, xAI, Mistral) ------
+# -- OpenAI-compatible providers (downsized build: Together AI only) ------------------
 
 COMPAT_VENDORS = {
-    "zai": "https://api.z.ai/api/paas/v4",
-    "deepseek": "https://api.deepseek.com",
-    "kimi": "https://api.moonshot.ai/v1",
-    "minimax": "https://api.minimax.io/v1",
-    "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    "xai": "https://api.x.ai/v1",
-    "mistral": "https://api.mistral.ai/v1",
+    "together": "https://api.together.xyz/v1",
 }
 
 
@@ -307,22 +301,22 @@ def test_compat_vendor_descriptors_ship_prefilled_endpoints():
 def test_compat_builder_defaults_and_profile_override(monkeypatch):
     from coworker.providers.registry import build_provider_client
 
-    p = build_provider_client("zai", {"api_key": "zk"}, None)
-    assert p._base_url == COMPAT_VENDORS["zai"]
-    assert p._api_key == "zk"
+    p = build_provider_client("together", {"api_key": "tk"}, None)
+    assert p._base_url == COMPAT_VENDORS["together"]
+    assert p._api_key == "tk"
 
-    override = "https://open.bigmodel.cn/api/paas/v4"
-    p2 = build_provider_client("zai", {"api_key": "zk", "base_url": override}, None)
+    override = "https://my.proxy.example/v1"
+    p2 = build_provider_client("together", {"api_key": "tk", "base_url": override}, None)
     assert p2._base_url == override
 
 
 def test_compat_builder_env_key_fallback(monkeypatch):
     from coworker.providers.registry import build_provider_client
 
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
-    p = build_provider_client("deepseek", {}, None)
-    assert p._api_key == "ds-key"
-    assert p._base_url == COMPAT_VENDORS["deepseek"]
+    monkeypatch.setenv("TOGETHER_API_KEY", "tok-key")
+    p = build_provider_client("together", {}, None)
+    assert p._api_key == "tok-key"
+    assert p._base_url == COMPAT_VENDORS["together"]
 
 
 def test_compat_builder_never_leaks_the_openai_key(monkeypatch):
@@ -333,9 +327,9 @@ def test_compat_builder_never_leaks_the_openai_key(monkeypatch):
     from coworker.providers.registry import build_provider_client
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-real")
-    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="Kimi"):
-        build_provider_client("kimi", {}, None)
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="Together"):
+        build_provider_client("together", {}, None)
 
 
 def test_compat_models_route_and_get_tool_capabilities():
@@ -345,30 +339,15 @@ def test_compat_models_route_and_get_tool_capabilities():
         ProviderRouter
     )  # only using _provider_name (stateless)
     for model in (
-        "zai:glm-5.2",
-        "deepseek:deepseek-v4-flash",
-        "kimi:kimi-k2.6",
-        "minimax:MiniMax-M2.5",
-        "qwen:qwen3-max",
-        "xai:grok-4.3",
-        "mistral:mistral-large-latest",
+        "together:zai-org/GLM-5.2",
+        "together:moonshotai/Kimi-K2.6",
+        "together:deepseek-ai/DeepSeek-V4-Pro",
     ):
         prefix = model.split(":", 1)[0]
         assert router._provider_name(model) == prefix
         assert ProviderRouter._bare(model) == model.split(":", 1)[1]
         caps = capabilities_for(model)
         assert caps.tools and caps.streaming
-
-
-def test_compat_recommended_models_are_in_the_suggested_lists():
-    """set_provider only auto-adds the recommended model if it's in _suggested_models —
-    keep the registry and the manager's COMPAT_MODELS table in lockstep."""
-    from coworker.providers.registry import get_descriptor
-    from coworker.server.manager import SessionManager
-
-    for name in COMPAT_VENDORS:
-        d = get_descriptor(name)
-        assert d.recommended_model in SessionManager.COMPAT_MODELS[name], name
 
 
 # -- curated model matrix (labels + capabilities by full routed id) -----------------
@@ -380,7 +359,7 @@ def test_matrix_answers_capabilities_for_reseller_ids():
     for mid in (
         "together:zai-org/GLM-5.2",
         "together:meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-        "fireworks:accounts/fireworks/models/kimi-k2p6",
+        "together:moonshotai/Kimi-K2.6",
     ):
         caps = capabilities_for(mid)
         assert caps.tools and caps.parallel_tool_calls and caps.streaming
@@ -391,7 +370,6 @@ def test_matrix_labels_and_custom_model_fallback():
 
     labels = model_labels()
     assert labels["together:zai-org/GLM-5.2"] == "GLM-5.2 · via Together"
-    assert labels["zai:glm-5.2"] == "GLM-5.2 · Z AI"
     # Deliberately small: agent-capable current models only (owner call, 2026-07-04).
     assert len(MATRIX) < 40
     assert all(e.caps.tools for e in MATRIX.values())
@@ -402,12 +380,12 @@ def test_matrix_labels_and_custom_model_fallback():
 
 
 def test_reseller_descriptors_and_matrix_stay_in_lockstep():
-    """Together/Fireworks suggested models derive from the matrix, and each descriptor's
-    recommended model must be one of them (set_provider's auto-add depends on it)."""
+    """Together suggested models derive from the matrix, and its descriptor's recommended
+    model must be one of them (set_provider's auto-add depends on it)."""
     from coworker.providers.matrix import models_for_provider
     from coworker.providers.registry import get_descriptor
 
-    for name in ("together", "fireworks"):
+    for name in ("together",):
         d = get_descriptor(name)
         assert d is not None and d.needs_key
         curated = models_for_provider(name)

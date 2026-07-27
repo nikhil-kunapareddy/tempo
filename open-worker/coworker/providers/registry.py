@@ -6,10 +6,10 @@ GUI, same `to_dict()` shape connectors use) and a `build(profile, secrets)` fact
 a `ProviderClient`. The `ProviderRouter` selects a descriptor by the `provider:` prefix of a
 model string and builds (and caches) its client from the matching SecretStore profile.
 
-Today: `openai` (the default, with an optional custom endpoint that covers Azure OpenAI's
-`/openai/v1` and any OpenAI-compliant gateway), `anthropic` (native Messages API via
-`AnthropicProvider`), `gemini` (native Google GenAI API via `GeminiProvider`), and `ollama`
-(local, OpenAI-compatible `/v1`). Bedrock/Vertex auth for Claude is future work.
+Downsized build — three descriptors only: `together` (the sole cloud key provider, reached
+through its OpenAI-compatible API), `openai` (retained purely as the transport client + the
+default router fallback for bare model ids), and `ollama` (local, keyless, OpenAI-compatible
+`/v1`). Native Anthropic/Gemini providers and the other reseller/vendor keys were removed.
 """
 
 from __future__ import annotations
@@ -18,9 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from .anthropic_provider import AnthropicProvider
 from .base import ProviderClient
-from .gemini_provider import GeminiProvider
 from .openai_provider import OpenAIProvider
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -101,29 +99,6 @@ def _build_openai(profile: dict[str, Any], secrets: Any) -> ProviderClient:
     # OpenRouter, vLLM, …) comes from the stored profile.
     base_url = ((profile or {}).get("base_url") or "").strip() or None
     return OpenAIProvider(secrets=secrets, base_url=base_url)
-
-
-def _build_anthropic(profile: dict[str, Any], secrets: Any) -> ProviderClient:
-    # Key resolution stays in AnthropicProvider/resolve_api_key (explicit → env → SecretStore),
-    # deferred to first call so the provider can be built before a key exists.
-    # thinking_budget: hidden profile override — absent/invalid → the default (ON),
-    # explicit 0 → off (see DEFAULT_THINKING_BUDGET).
-    from .anthropic_provider import DEFAULT_THINKING_BUDGET
-
-    api_key = ((profile or {}).get("api_key") or "").strip() or None
-    try:
-        thinking_budget = int(str((profile or {}).get("thinking_budget") or "").strip())
-    except ValueError:
-        thinking_budget = DEFAULT_THINKING_BUDGET
-    return AnthropicProvider(
-        api_key=api_key, secrets=secrets, thinking_budget=thinking_budget
-    )
-
-
-def _build_gemini(profile: dict[str, Any], secrets: Any) -> ProviderClient:
-    # Same deferred-key contract as anthropic (GeminiProvider/resolve_api_key).
-    api_key = ((profile or {}).get("api_key") or "").strip() or None
-    return GeminiProvider(api_key=api_key, secrets=secrets)
 
 
 def _build_ollama(profile: dict[str, Any], secrets: Any) -> ProviderClient:
@@ -218,107 +193,10 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         recommended_model="gpt-5.6-sol",
         env_key="OPENAI_API_KEY",
     ),
-    ProviderDescriptor(
-        name="anthropic",
-        title="Claude (Anthropic)",
-        needs_key=True,
-        fields=[
-            ProviderField(
-                "api_key",
-                "Anthropic API key",
-                secret=True,
-                placeholder="sk-ant-…",
-            ),
-            # No thinking_budget field (owner call 2026-07-23): extended thinking is
-            # on by default; the profile key stays a hidden override (0 = off).
-        ],
-        build=_build_anthropic,
-        recommended_model="claude-fable-5",
-        env_key="ANTHROPIC_API_KEY",
-    ),
-    ProviderDescriptor(
-        name="gemini",
-        title="Gemini (Google)",
-        needs_key=True,
-        fields=[
-            ProviderField(
-                "api_key",
-                "Gemini API key",
-                secret=True,
-                placeholder="AIza…",
-            ),
-        ],
-        build=_build_gemini,
-        recommended_model="gemini-3.6-flash",
-        env_key="GEMINI_API_KEY",
-    ),
-    # OpenAI-compatible vendors, listed as first-class providers so users don't need to know the
-    # "point the OpenAI slot at a different endpoint" trick (owner call, 2026-07-04). Each keeps
-    # its own key profile; the endpoint is prefilled and editable (regional variants in `help`).
-    _compat(
-        "zai",
-        "Z AI (GLM)",
-        base_url="https://api.z.ai/api/paas/v4",
-        recommended_model="glm-5.2",
-        env_key="ZAI_API_KEY",
-        endpoint_help="Prefilled with Z AI's international endpoint. China mainland: https://open.bigmodel.cn/api/paas/v4",
-    ),
-    _compat(
-        "deepseek",
-        "DeepSeek",
-        base_url="https://api.deepseek.com",
-        recommended_model="deepseek-v4-flash",
-        env_key="DEEPSEEK_API_KEY",
-    ),
-    _compat(
-        "kimi",
-        "Kimi (Moonshot AI)",
-        base_url="https://api.moonshot.ai/v1",
-        recommended_model="kimi-k2.6",
-        env_key="MOONSHOT_API_KEY",
-        endpoint_help="Prefilled with Moonshot's international endpoint. China mainland: https://api.moonshot.cn/v1",
-    ),
-    _compat(
-        "minimax",
-        "MiniMax",
-        base_url="https://api.minimax.io/v1",
-        recommended_model="MiniMax-M2.5",
-        env_key="MINIMAX_API_KEY",
-    ),
-    _compat(
-        "qwen",
-        "Qwen (Alibaba)",
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        recommended_model="qwen3-max",
-        env_key="DASHSCOPE_API_KEY",
-        endpoint_help="Prefilled with Alibaba Model Studio's international endpoint. China (Beijing): https://dashscope.aliyuncs.com/compatible-mode/v1",
-    ),
-    _compat(
-        "xai",
-        "xAI (Grok)",
-        base_url="https://api.x.ai/v1",
-        recommended_model="grok-4.3",
-        env_key="XAI_API_KEY",
-    ),
-    _compat(
-        "mistral",
-        "Mistral",
-        base_url="https://api.mistral.ai/v1",
-        recommended_model="mistral-large-latest",
-        env_key="MISTRAL_API_KEY",
-    ),
-    _compat(
-        "meta",
-        "Meta (Muse Spark)",
-        base_url="https://api.meta.ai/v1",
-        recommended_model="muse-spark-1.1",
-        env_key="META_API_KEY",
-        endpoint_help="Prefilled with the Meta Model API endpoint (public preview, US-only as of 2026-07).",
-    ),
-    # Resellers: many labs' models behind one key, using THEIR model namespaces (the curated
-    # ids + display labels live in providers/matrix.py). TODO: add Groq and OpenRouter here
-    # (+ their matrix rows) once the current provider surface is tested — deliberately
-    # deferred to bound how much needs verifying at once (owner call, 2026-07-04).
+    # Together AI — the only reseller in this downsized build. Reached through its
+    # OpenAI-compatible API (see _openai_compat), using Together's own model namespaces
+    # (curated ids + labels live in providers/matrix.py). The `openai` descriptor above
+    # is retained solely as the transport client + default router fallback for bare ids.
     _compat(
         "together",
         "Together AI",
@@ -326,13 +204,8 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         recommended_model="zai-org/GLM-5.2",
         env_key="TOGETHER_API_KEY",
     ),
-    _compat(
-        "fireworks",
-        "Fireworks AI",
-        base_url="https://api.fireworks.ai/inference/v1",
-        recommended_model="accounts/fireworks/models/glm-5p2",
-        env_key="FIREWORKS_API_KEY",
-    ),
+    # Local, keyless option — kept because it introduces no third-party cloud key
+    # (the downsized build's only cloud key is Together's).
     ProviderDescriptor(
         name="ollama",
         title="Ollama (local models)",

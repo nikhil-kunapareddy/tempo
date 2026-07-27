@@ -386,14 +386,14 @@ def test_provider_extras_persist_on_message_and_survive_outbound(tmp_path):
 def test_switch_model_appends_notice_only_midsession(tmp_path):
     engine, _ = _engine(tmp_path, [_text_turn("ok")])
     # Fresh session: first bind is silent.
-    assert engine.switch_model("zai:glm-5.2") is None
-    assert engine.model == "zai:glm-5.2"
+    assert engine.switch_model("together:zai-org/GLM-5.2") is None
+    assert engine.model == "together:zai-org/GLM-5.2"
     _collect(engine, "hi")
     # Same model: no-op.
-    assert engine.switch_model("zai:glm-5.2") is None
+    assert engine.switch_model("together:zai-org/GLM-5.2") is None
     # Real mid-session switch: persisted marker with the matrix label.
-    text = engine.switch_model("kimi:kimi-k2.6")
-    assert "Kimi K2.6" in text and engine.model == "kimi:kimi-k2.6"
+    text = engine.switch_model("together:moonshotai/Kimi-K2.6")
+    assert "Kimi K2.6" in text and engine.model == "together:moonshotai/Kimi-K2.6"
     notice = engine.messages[-1]
     assert notice["role"] == "notice" and notice["kind"] == "model_switch"
     assert all(m.get("role") != "notice" for m in engine._outbound_messages())

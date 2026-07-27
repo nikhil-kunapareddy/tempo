@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tempo</title>
+  <style>
+    :root {
+      --bg:#0f1115; --sidebar:#12151c; --panel:#171a21; --border:#272b35;
+      --text:#e7e9ee; --muted:#9aa2b1; --accent:#4f8cff; --ok:#3fb950; --off:#6b7280;
+    }
+    * { box-sizing: border-box; }
+    html, body { height:100%; margin:0; }
+    body { font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+
+    .app { display:flex; height:100vh; }
+
+    /* -- sidebar -- */
+    .sidebar { width:300px; flex-shrink:0; background:var(--sidebar); border-right:1px solid var(--border);
+               display:flex; flex-direction:column; padding:18px 16px; overflow-y:auto; }
+    .brand { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+    .brand span { color:var(--muted); font-weight:400; font-size:12px; display:block; margin-top:2px; }
+    .pills { display:flex; gap:8px; margin:16px 0; flex-wrap:wrap; }
+    .pill { font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+    .pill.on { color:#fff; border-color:transparent; background:rgba(63,185,80,.18); }
+    .pill.on .dot { background:var(--ok); }
+    .pill .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--off); margin-right:6px; vertical-align:middle; }
+
+    .settings { margin-top:8px; border-top:1px solid var(--border); padding-top:16px; }
+    .settings h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+    .field { display:flex; flex-direction:column; gap:5px; margin:12px 0; }
+    .field label { font-size:12px; color:var(--muted); }
+    input { background:var(--panel); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; width:100%; }
+    .sidebar .actions { margin-top:14px; display:flex; align-items:center; gap:10px; }
+    .save-status { font-size:12px; color:var(--muted); }
+    .spacer { flex:1; }
+
+    /* -- chat pane -- */
+    .chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+    #log { flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:12px; }
+    .empty { margin:auto; color:var(--muted); text-align:center; max-width:360px; }
+    .msg { padding:10px 14px; border-radius:12px; max-width:80%; white-space:pre-wrap; word-wrap:break-word; }
+    .user { align-self:flex-end; background:var(--accent); color:#fff; }
+    .assistant { align-self:flex-start; background:var(--panel); border:1px solid var(--border); }
+    .assistant.approval { border-color:#3a4a2a; background:#1b2116; }
+    .tool { align-self:flex-start; font-size:12px; color:var(--muted); font-style:italic; }
+    .err { align-self:flex-start; background:#3a1d22; border:1px solid #7a2b34; color:#ffd7dc; }
+
+    .composer { border-top:1px solid var(--border); padding:14px 24px; display:flex; gap:8px; }
+    .composer input { flex:1; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 16px; font:inherit; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:default; }
+    button.secondary { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .row { display:flex; gap:8px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">Tempo<span>Together AI · Google Calendar</span></div>
+
+      <div class="pills">
+        <span class="pill" id="pill-together"><span class="dot"></span>Together</span>
+        <span class="pill" id="pill-google"><span class="dot"></span>Calendar</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="settings">
+        <h3>Settings</h3>
+        <div class="field">
+          <label>Together AI key</label>
+          <input id="together_key" type="password" placeholder="leave blank to keep current" />
+        </div>
+        <div class="field">
+          <label>Google Calendar</label>
+          <div id="google-controls"></div>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <input id="model" list="modellist" placeholder="pick or type a Together model" />
+          <datalist id="modellist"></datalist>
+        </div>
+        <div class="actions">
+          <button id="save">Save</button>
+          <span class="save-status" id="settings-status"></span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <div id="log">
+        <div class="empty" id="empty">Ask Tempo about your calendar — e.g. “what's on Thursday?” or “add a standup Thursday at 9am”.</div>
+      </div>
+      <form class="composer" id="chat">
+        <input id="box" placeholder="Message Tempo…" autocomplete="off" />
+        <button type="submit" id="send">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <script>
+    const log = document.getElementById("log");
+    const history = [];
+
+    function add(role, text) {
+      const empty = document.getElementById("empty");
+      if (empty) empty.remove();
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      div.textContent = text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+      return div;
+    }
+
+    function renderGoogle(s) {
+      const el = document.getElementById("google-controls");
+      el.innerHTML = "";
+      if (s.google_connected) {
+        const span = document.createElement("span");
+        span.textContent = "Connected ✓  ";
+        span.style.cssText = "color:var(--ok);font-size:13px;margin-right:8px";
+        const btn = document.createElement("button");
+        btn.textContent = "Disconnect";
+        btn.className = "secondary";
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await fetch("/api/google/disconnect", { method: "POST" });
+          refreshStatus();
+        });
+        el.append(span, btn);
+      } else if (s.google_oauth_configured) {
+        const btn = document.createElement("button");
+        btn.textContent = "Connect Google Calendar";
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          window.location.href = "/api/google/login";
+        });
+        el.append(btn);
+      } else {
+        const p = document.createElement("div");
+        p.style.cssText = "font-size:12px;color:var(--muted)";
+        p.textContent = "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, then restart Tempo.";
+        el.append(p);
+      }
+    }
+
+    async function refreshStatus() {
+      const s = await (await fetch("/api/settings")).json();
+      document.getElementById("model").value = s.model || "";
+      document.getElementById("pill-together").classList.toggle("on", !!s.together_key_set);
+      document.getElementById("pill-google").classList.toggle("on", !!s.google_connected);
+      renderGoogle(s);
+    }
+
+    async function populateModels() {
+      try {
+        const data = await (await fetch("/api/models")).json();
+        const dl = document.getElementById("modellist");
+        dl.innerHTML = "";
+        (data.models || []).forEach((m) => {
+          const o = document.createElement("option");
+          o.value = m;
+          dl.appendChild(o);
+        });
+      } catch (e) { /* no key yet / offline — the field stays free-text */ }
+    }
+
+    document.getElementById("save").addEventListener("click", async (e) => {
+      e.preventDefault();
+      const body = {
+        together_key: document.getElementById("together_key").value || null,
+        model: document.getElementById("model").value || null,
+      };
+      await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      document.getElementById("together_key").value = "";
+      const st = document.getElementById("settings-status");
+      st.textContent = "saved ✓";
+      setTimeout(() => (st.textContent = ""), 1800);
+      refreshStatus();
+      populateModels();  // a freshly-saved key unlocks the live model list
+    });
+
+    function renderSteps(steps) {
+      (steps || []).forEach((s) => {
+        add("tool", s.approved === false ? "🚫 declined " + s.tool : "🛠 " + s.tool);
+      });
+    }
+
+    function renderApproval(data, pendingUserText) {
+      const card = document.createElement("div");
+      card.className = "msg assistant approval";
+      const list = (data.pending || []).map((p) => "• " + (p.summary || p.name)).join("\n");
+      const title = document.createElement("div");
+      title.textContent = "Approve this calendar change?\n" + list;
+      title.style.whiteSpace = "pre-wrap";
+      title.style.marginBottom = "10px";
+      const row = document.createElement("div");
+      row.className = "row";
+      const yes = document.createElement("button");
+      yes.textContent = "Approve";
+      const no = document.createElement("button");
+      no.textContent = "Reject";
+      no.className = "secondary";
+      row.append(yes, no);
+      card.append(title, row);
+      log.appendChild(card);
+      log.scrollTop = log.scrollHeight;
+
+      const decide = async (decision) => {
+        yes.disabled = no.disabled = true;
+        row.remove();
+        add("tool", decision === "approve" ? "✅ approved" : "🚫 rejected");
+        const thinking = add("assistant", "…");
+        try {
+          const res = await fetch("/api/approve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messages: data.messages, pending: data.pending, decision }),
+          });
+          thinking.remove();
+          handleResponse(await res.json(), pendingUserText);
+        } catch (err) {
+          thinking.remove();
+          add("err", String(err));
+        }
+      };
+      yes.addEventListener("click", () => decide("approve"));
+      no.addEventListener("click", () => decide("reject"));
+    }
+
+    function handleResponse(data, userText) {
+      renderSteps(data.steps);
+      if (data.error) { add("err", data.error); return; }
+      if (data.status === "approval_required") { renderApproval(data, userText); return; }
+      add("assistant", data.reply || "(no reply)");
+      history.push({ role: "user", content: userText });
+      history.push({ role: "assistant", content: data.reply || "" });
+    }
+
+    document.getElementById("chat").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const box = document.getElementById("box");
+      const text = box.value.trim();
+      if (!text) return;
+      box.value = "";
+      add("user", text);
+      const sendBtn = document.getElementById("send");
+      sendBtn.disabled = true;
+      const thinking = add("assistant", "…");
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history }),
+        });
+        thinking.remove();
+        handleResponse(await res.json(), text);
+      } catch (err) {
+        thinking.remove();
+        add("err", String(err));
+      } finally {
+        sendBtn.disabled = false;
+        box.focus();
+      }
+    });
+
+    refreshStatus();
+    populateModels();
+  </script>
+</body>
+</html>

@@ -9,24 +9,24 @@ from coworker.providers.matrix import MATRIX, models_for_provider
 from coworker.providers.registry import get_descriptor
 
 
-def test_new_flagships_in_matrix_with_labels():
+def test_together_models_in_matrix_with_labels():
+    # Downsized build: the curated matrix is Together-only.
     for mid, label in {
-        "gpt-5.6-sol": "GPT-5.6 Sol · OpenAI",
-        "gpt-5.6-terra": "GPT-5.6 Terra · OpenAI",
-        "gpt-5.6-luna": "GPT-5.6 Luna · OpenAI",
-        "anthropic:claude-fable-5": "Claude Fable 5 · Anthropic",
+        "together:zai-org/GLM-5.2": "GLM-5.2 · via Together",
+        "together:moonshotai/Kimi-K2.6": "Kimi K2.6 · via Together",
     }.items():
         assert MATRIX[mid].label == label
-        assert MATRIX[mid].caps.tools and MATRIX[mid].caps.vision
+        assert MATRIX[mid].caps.tools
 
-    assert "gpt-5.6-sol" in models_for_provider("openai")
-    assert "claude-fable-5" in models_for_provider("anthropic")
+    assert "zai-org/GLM-5.2" in models_for_provider("together")
 
 
 def test_flagships_are_the_defaults():
+    # gpt-5.6-sol stays the pre-config placeholder default (openai is the transport /
+    # fallback descriptor); the sole cloud key provider is Together.
     assert Config().model == "gpt-5.6-sol"
     assert get_descriptor("openai").recommended_model == "gpt-5.6-sol"
-    assert get_descriptor("anthropic").recommended_model == "claude-fable-5"
+    assert get_descriptor("together").recommended_model == "zai-org/GLM-5.2"
 
 
 # -- friendly access/quota errors --------------------------------------------------------

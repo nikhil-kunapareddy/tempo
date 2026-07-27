@@ -897,21 +897,23 @@ def test_ws_first_message_binds_then_midsession_switch_persists_notice(tmp_path)
     with client.websocket_connect("/ws/session/model-per-msg") as ws:
         ready = ws.receive_json()
         assert ready["type"] == "ready"
-        ws.send_json({"type": "user_message", "text": "hi", "model": "zai:glm-5.2"})
+        ws.send_json(
+            {"type": "user_message", "text": "hi", "model": "together:zai-org/GLM-5.2"}
+        )
         assert "model_changed" not in _drain(ws)  # first bind is silent
         # message WITHOUT a model keeps the bound one (no silent reset to default)
         ws.send_json({"type": "user_message", "text": "again"})
         _drain(ws)
-        ws.send_json({"type": "set_model", "model": "kimi:kimi-k2.6"})
+        ws.send_json({"type": "set_model", "model": "together:moonshotai/Kimi-K2.6"})
         changed = ws.receive_json()
         assert changed["type"] == "model_changed"
-        assert changed["data"]["model"] == "kimi:kimi-k2.6"
+        assert changed["data"]["model"] == "together:moonshotai/Kimi-K2.6"
         assert "Kimi" in changed["data"]["text"]
         ws.send_json({"type": "user_message", "text": "switched now"})
         _drain(ws)
     mgr = client.app.state.manager
     engine = mgr._engines["model-per-msg"]
-    assert engine.model == "kimi:kimi-k2.6"
+    assert engine.model == "together:moonshotai/Kimi-K2.6"
     # The marker is persisted between the turns; the provider never sees it.
     messages = client.get("/v1/sessions/model-per-msg/messages").json()["messages"]
     notices = [m for m in messages if m["role"] == "notice"]
@@ -976,15 +978,15 @@ def test_provider_set_and_remove_roundtrip(tmp_path):
     """
     client = _client(tmp_path, [])
     assert client.post(
-        "/v1/providers", json={"name": "zai", "fields": {"api_key": "zk-test"}}
+        "/v1/providers", json={"name": "together", "fields": {"api_key": "tok-test"}}
     ).json()["ok"]
     prov = {p["name"]: p for p in client.get("/v1/providers").json()}
-    assert prov["zai"]["configured"] and prov["zai"]["key_set_at"]
+    assert prov["together"]["configured"] and prov["together"]["key_set_at"]
 
-    assert client.delete("/v1/providers/zai").json()["ok"]
+    assert client.delete("/v1/providers/together").json()["ok"]
     prov = {p["name"]: p for p in client.get("/v1/providers").json()}
-    assert not prov["zai"]["configured"]
-    assert not prov["zai"]["key_set_at"]
+    assert not prov["together"]["configured"]
+    assert not prov["together"]["key_set_at"]
 
     assert not client.delete("/v1/providers/nope").json()["ok"]
 
