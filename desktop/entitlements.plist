@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements applied when code-signing the app and the bundled sidecar.
+     disable-library-validation is required by the PyInstaller sidecar: it loads Python shared
+     libraries signed by a different Team ID, which library validation would otherwise refuse.
+     Accepted by notarization. -->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

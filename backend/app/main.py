@@ -4,6 +4,7 @@ Phase 3 wraps this same server as a Tauri sidecar."""
 
 from __future__ import annotations
 
+import os
 import secrets as _secrets
 from pathlib import Path
 from typing import Any
@@ -13,18 +14,44 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
+from .paths import is_frozen, resource_dir
+
 # Load repo-root .env so GOOGLE_CLIENT_ID/SECRET, TOGETHER_API_KEY, etc. are available without
-# manually exporting them. Done before the app reads any env.
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+# manually exporting them. Done before the app reads any env. A packaged build has no repo
+# root and gets its OAuth client from the bundled oauth_client.json instead (see config.py).
+if not is_frozen():
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from . import agent, config, google_oauth, together  # noqa: E402  (import after dotenv load)
 
 # transient CSRF state for the OAuth round-trip (single local user)
 _oauth_state: dict[str, bool] = {}
 
-WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+# Frozen: `_internal/web/` from the spec's datas. Source: `<repo>/web/`.
+WEB_DIR = resource_dir() / "web"
+
+# Keep the OAuth redirect URI in step with the port we're served on. server_entry sets this
+# directly; TEMPO_PORT covers a bare `uvicorn --port N` run.
+if os.environ.get("TEMPO_PORT"):
+    try:
+        config.set_runtime_port(int(os.environ["TEMPO_PORT"]))
+    except ValueError:
+        pass
 
 app = FastAPI(title="Tempo (Together + Google Calendar)")
+
+# Shown in the system browser after a desktop OAuth round-trip (see google_callback).
+_CONNECTED_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tempo</title>
+<style>
+ body{background:#0f1115;color:#e7e9ee;font:15px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+      height:100vh;margin:0;display:flex;align-items:center;justify-content:center;text-align:center}
+ .c{max-width:360px} .t{font-size:17px;font-weight:600;margin-bottom:8px}
+ .m{color:#9aa2b1;font-size:14px} .ok{color:#3fb950;font-size:32px;margin-bottom:12px}
+</style></head><body><div class="c">
+ <div class="ok">&#10003;</div>
+ <div class="t">Google Calendar connected</div>
+ <div class="m">You can close this tab and return to Tempo.</div>
+</div></body></html>"""
 
 
 class ChatIn(BaseModel):
@@ -96,6 +123,12 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
         google_oauth.store_tokens(google_oauth.exchange_code(code))
     except Exception as exc:
         return HTMLResponse(f"<p>Couldn't complete Google sign-in: {exc}</p>", status_code=502)
+    if os.environ.get("TEMPO_DESKTOP") == "1":
+        # The desktop shell sends the consent flow to the system browser (Google blocks OAuth
+        # in embedded webviews), so this page renders in a browser tab, not in the app. Sending
+        # it to "/" would open a second, browser-based copy of Tempo; tell the user to go back
+        # instead. The app picks the new state up on window focus.
+        return HTMLResponse(_CONNECTED_PAGE)
     return RedirectResponse("/")  # back into the app, now connected
 
 

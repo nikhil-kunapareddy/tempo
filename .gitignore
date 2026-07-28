@@ -5,3 +5,8 @@ __pycache__/
 .DS_Store
 /secrets
 .env
+
+# Build-time OAuth client (holds the client secret) + PyInstaller output
+packaging/oauth_client.json
+packaging/build/
+packaging/dist/

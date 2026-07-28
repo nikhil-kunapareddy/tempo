@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tempo</title>
+    <style>
+      :root { --bg:#0f1115; --text:#e7e9ee; --muted:#9aa2b1; --accent:#4f8cff; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg); color: var(--text);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+        -webkit-user-select: none; user-select: none;
+      }
+      .wrap { text-align: center; }
+      .dot {
+        width: 40px; height: 40px; margin: 0 auto 20px;
+        border: 3px solid rgba(79,140,255,.25); border-top-color: var(--accent);
+        border-radius: 50%; animation: spin .9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; letter-spacing: .2px; }
+      p { font-size: 13px; color: var(--muted); margin: 0; }
+      /* Shown by main.rs if the sidecar never comes up. */
+      #failed { display: none; max-width: 380px; }
+      #failed code {
+        display: block; margin-top: 10px; font-size: 11px; color: var(--muted);
+        word-break: break-all;
+      }
+      body.failed .dot, body.failed #loading { display: none; }
+      body.failed #failed { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="dot"></div>
+      <div id="loading">
+        <h1>Starting Tempo…</h1>
+        <p>Connecting to the local server</p>
+      </div>
+      <div id="failed">
+        <h1>Tempo couldn’t start its server</h1>
+        <p>
+          The local server didn’t come up. Check the log for details, then reopen Tempo.
+          <code>~/.tempo/logs/tempo-server.log</code>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
