@@ -249,9 +249,42 @@ def _split_org(row: dict[str, str]) -> dict[str, str]:
     return row
 
 
+# Words that make a cell a job title rather than a person's name.
+_ROLE_WORDS = {
+    "engineer", "engineering", "scientist", "science", "developer", "development", "manager",
+    "product", "research", "researcher", "intern", "internship", "analyst", "designer", "design",
+    "lead", "director", "head", "associate", "specialist", "fellow", "postdoc", "architect",
+    "consultant", "software", "data", "ml", "ai", "machine", "learning", "bioinformatics",
+    "computational", "biologist", "biology", "chemist", "chemistry", "swe", "mle", "sde", "sre",
+    "qa", "devops", "frontend", "backend", "fullstack", "stack", "staff", "senior", "principal",
+    "junior", "technician", "coordinator", "operations", "marketing", "sales", "founding",
+    "platform", "infrastructure", "applied", "quantitative", "programmer", "student", "role",
+}
+_NAME_SPLIT = re.compile(r"\s*(?:,|&|/|;|\band\b)\s*")
+_NAME_TOKEN = re.compile(r"^(?:[A-ZÀ-Ý][a-zß-ÿ'’.\-]*[a-zß-ÿ][a-zß-ÿ'’.\-A-ZÀ-Ý]*|[A-ZÀ-Ý]\.?)$")
+
+
+def _looks_like_role(text: str) -> bool:
+    return any(word in _ROLE_WORDS for word in re.findall(r"[a-z]+", text.lower()))
+
+
+def _looks_like_names(text: str) -> bool:
+    """"Gleb Kuznetsov", "Avi Asherov, Joshua Meier", "Ana" — but not "SRE" or "Data Engineer"."""
+    if _looks_like_role(text):
+        return False
+    people = [p for p in _NAME_SPLIT.split(text) if p]
+    return bool(people) and all(
+        1 <= len(p.split()) <= 4 and all(_NAME_TOKEN.match(t) for t in p.split())
+        and any(len(t.rstrip(".")) > 1 for t in p.split())
+        for p in people
+    )
+
+
 def _guess_row(record: list[str]) -> dict[str, str]:
-    """A row with no header to go by: emails and URLs are recognised by their shape, and the
-    remaining text is org, then (role,) contact name, then anything else as About."""
+    """A row with no header to go by. Emails and URLs are recognised by their shape; the first
+    other cell is the org; of the rest, a cell full of job-title words is the role and one that
+    reads as people's names is the contact, in whichever order the sheet has them. Anything
+    left over goes to About."""
     row = dict.fromkeys(ROW_FIELDS, "")
     texts = []
     for cell in record:
@@ -265,13 +298,27 @@ def _guess_row(record: list[str]) -> dict[str, str]:
             row["website"] = cell
         else:
             texts.append(cell)
-    if texts:
-        row["org"] = texts[0]
-    if len(texts) == 2:
-        row["recruiter_name"] = texts[1]
-    elif len(texts) >= 3:
-        row["role"], row["recruiter_name"] = texts[1], texts[2]
-        row["about"] = " · ".join(texts[3:])
+    if not texts:
+        return row
+    row["org"], rest = texts[0], texts[1:]
+
+    contact = next((t for t in rest if _looks_like_names(t)), None)
+    role = next((t for t in rest if t is not contact and _looks_like_role(t)), None)
+    left = [t for t in rest if t is not contact and t is not role]
+    if contact is None and role is None:
+        # Nothing recognisable: fall back to the column order org, role, contact.
+        if len(left) == 1:
+            contact = left.pop(0)
+        elif len(left) >= 2:
+            role, contact = left.pop(0), left.pop(0)
+    elif contact is None and left:
+        contact = left.pop(0)
+    elif role is None and left and rest.index(left[0]) < rest.index(contact):
+        # An unrecognised cell before the contact ("Acme, DE, Ana") is most likely the role,
+        # as in the plain org, role, contact order.
+        role = left.pop(0)
+    row["role"], row["recruiter_name"] = role or "", contact or ""
+    row["about"] = " · ".join(left)
     return row
 
 

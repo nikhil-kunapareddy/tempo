@@ -734,3 +734,50 @@ def test_import_file_rejects(client, filename, data, fragment):
     _setup(client)
     r = client.post("/api/outreach/import-file", json={"filename": filename, "data_base64": _b64(data)})
     assert r.status_code == 400 and fragment in r.json()["detail"]
+
+
+def test_parse_endpoint_returns_rows_without_saving(client):
+    _setup(client)
+    before = client.get("/api/outreach").json()["rows"]
+    r = client.post("/api/outreach/parse", json={"csv": "\n".join("\t".join(c) for c in SHEET)})
+    assert r.status_code == 200, r.text
+    assert _shape(r.json()["rows"]) == SHEET_ROWS
+    assert all("id" not in row for row in r.json()["rows"])
+    assert client.get("/api/outreach").json()["rows"] == before  # nothing saved
+    assert client.post("/api/outreach/parse", json={"csv": "  "}).status_code == 400
+
+
+# From the user's Google Sheet: contact (D) comes before role (E), and a cell can name two people.
+SHEET_WITH_ROLES = (
+    "Chai Discovery - AI antibody design (San Francisco)\t\thttps://www.chaidiscovery.com/\tAvi Asherov, Joshua Meier\tSoftware Engineer, Product\n"
+    "Aureka Biotechnologies, Inc. - AI antibody discovery (Laguna Hills)\t\thttps://www.aurekabio.com/\tWeian Zhao\t\tcontact@aurekabio.com\n"
+    "Manifold Bio - AI protein engineering platform (Boston)\t\thttps://www.manifold.bio/\tGleb Kuznetsov\tResearch Engineer\n"
+    "Manas AI - neuro-symbolic AI drug discovery (San Francisco)\n"
+)
+
+
+def test_parse_tells_roles_from_names_in_any_order():
+    rows = outreach.parse_csv(SHEET_WITH_ROLES)
+    assert [(r["org"], r["role"], r["recruiter_name"], r["recruiter_email"]) for r in rows] == [
+        ("Chai Discovery", "Software Engineer, Product", "Avi Asherov, Joshua Meier", ""),
+        ("Aureka Biotechnologies, Inc.", "", "Weian Zhao", "contact@aurekabio.com"),
+        ("Manifold Bio", "Research Engineer", "Gleb Kuznetsov", ""),
+        ("Manas AI", "", "", ""),  # org only: fine to paste, contact filled in later
+    ]
+    assert rows[3]["about"] == "neuro-symbolic AI drug discovery (San Francisco)"
+
+
+@pytest.mark.parametrize(
+    "line, role, contact",
+    [
+        ("Acme,Data Engineer,Ana,ana@acme.com", "Data Engineer", "Ana"),
+        ("Globex,SRE,Raj", "SRE", "Raj"),
+        ("Acme,DE,Ana", "DE", "Ana"),  # unknown acronym before the contact: still the role
+        ("Initech,Bo Chen", "", "Bo Chen"),
+        ("Initech,ML Intern,Jean-Luc O'Neil & J. Smith", "ML Intern", "Jean-Luc O'Neil & J. Smith"),
+        ("Initech,Jean-Luc O'Neil,Research Scientist", "Research Scientist", "Jean-Luc O'Neil"),
+    ],
+)
+def test_parse_role_and_contact(line, role, contact):
+    row = outreach.parse_csv(line)[0]
+    assert (row["role"], row["recruiter_name"]) == (role, contact)

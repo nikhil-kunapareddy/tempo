@@ -232,6 +232,12 @@ def outreach_import(body: CsvIn) -> dict[str, Any]:
     return _outreach(lambda: outreach.import_csv(body.csv))
 
 
+@app.post("/api/outreach/parse")
+def outreach_parse(body: CsvIn) -> dict[str, Any]:
+    """Rows from a pasted block, without saving: the grid places them where the paste landed."""
+    return _outreach(lambda: {"rows": outreach.parse_csv(body.csv)})
+
+
 @app.post("/api/outreach/import-file")
 def outreach_import_file(body: ResumeIn) -> dict[str, Any]:
     """Replace the recipients table with an .xlsx, .xls or .csv file's rows."""
