@@ -1,6 +1,6 @@
-"""FastAPI backend: serves the minimal web UI and the chat/settings API. In this web-first
-phase you run it with `uvicorn backend.app.main:app --reload` and open http://localhost:8000.
-Phase 3 wraps this same server as a Tauri sidecar."""
+"""FastAPI backend: serves the minimal web UI and the chat/settings API. For web-only work run
+it with `uvicorn backend.app.main:app --reload` and open http://localhost:8000; the desktop app
+(`python -m desktop.main`) runs this same server on a thread behind a WKWebView window."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from .paths import is_frozen, resource_dir
@@ -22,7 +22,7 @@ from .paths import is_frozen, resource_dir
 if not is_frozen():
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from . import agent, config, google_oauth, together  # noqa: E402  (import after dotenv load)
+from . import agent, config, google_oauth, together, updater  # noqa: E402  (import after dotenv load)
 
 # transient CSRF state for the OAuth round-trip (single local user)
 _oauth_state: dict[str, bool] = {}
@@ -30,8 +30,9 @@ _oauth_state: dict[str, bool] = {}
 # Frozen: `_internal/web/` from the spec's datas. Source: `<repo>/web/`.
 WEB_DIR = resource_dir() / "web"
 
-# Keep the OAuth redirect URI in step with the port we're served on. server_entry sets this
-# directly; TEMPO_PORT covers a bare `uvicorn --port N` run.
+# Keep the OAuth redirect URI in step with the port we're served on. desktop/main.py calls
+# config.set_runtime_port() before importing this module; TEMPO_PORT covers a bare
+# `uvicorn --port N` run.
 if os.environ.get("TEMPO_PORT"):
     try:
         config.set_runtime_port(int(os.environ["TEMPO_PORT"]))
@@ -69,6 +70,7 @@ class SettingsIn(BaseModel):
     together_key: str | None = None
     google_access_token: str | None = None
     model: str | None = None
+    auto_update: bool | None = None
 
 
 @app.get("/api/health")
@@ -153,6 +155,22 @@ def approve(body: ApproveIn) -> dict[str, Any]:
         return agent.resume(body.messages, body.pending, body.decision)
     except RuntimeError as exc:
         return {"status": "error", "reply": None, "error": str(exc)}
+
+
+@app.get("/api/update")
+def update_status() -> dict[str, Any]:
+    """Where the launch-time update check got to; the UI shows a banner once it is `ready`."""
+    return updater.status()
+
+
+@app.post("/api/update/install")
+def update_install():
+    """Swap in the downloaded update and restart. Tempo quits shortly after this responds."""
+    try:
+        updater.install()
+    except updater.UpdateError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True}
 
 
 @app.get("/")

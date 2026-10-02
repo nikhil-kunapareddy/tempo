@@ -1,15 +1,18 @@
-"""Local-first settings: the Together key, the Google Calendar OAuth token, and the model.
+"""Local-first settings: the Together key, the Google Calendar OAuth token, the model, and
+whether to check for updates.
 
 Secrets live in the macOS Keychain when it's available and fall back to a 0600 JSON file
-under the user's home; non-secret preferences (the model) always live in the JSON file.
-Env vars override both, so you can still run headless without saving anything to disk.
-Nothing leaves the machine except calls to Together and Google, which the user configures here.
+under the user's home; non-secret preferences (the model, the update toggle) always live in the
+JSON file. Env vars override both, so you can still run headless without saving anything to disk.
+Nothing leaves the machine except calls to Together and Google, which the user configures here,
+and the launch-time update check against GitHub, which Settings can turn off.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +56,29 @@ def runtime_port() -> int:
     return _runtime_port
 
 
+def port_is_free(host: str, port: int) -> bool:
+    """True if `port` can be bound on `host` right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_free_port(host: str = "127.0.0.1", candidates: tuple[int, ...] | None = None) -> int | None:
+    """First free port among the OAuth-registered candidates, or None if they're all taken.
+
+    We can't fall back to an arbitrary free port: Google matches redirect_uri exactly, so a
+    port that isn't registered on the OAuth client would break "Connect Google Calendar".
+    """
+    for port in candidates if candidates is not None else CANDIDATE_PORTS:
+        if port_is_free(host, port):
+            return port
+    return None
+
+
 # -- settings file + keychain -------------------------------------------------------------
 def _read_file() -> dict[str, Any]:
     if SETTINGS_FILE.exists():
@@ -92,6 +118,9 @@ def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
     """Merge non-empty updates: secrets to the Keychain, everything else to settings.json."""
     current = _read_file()
     for key, value in updates.items():
+        if isinstance(value, bool):  # a toggle: False is a real choice, not "leave unchanged"
+            current[key] = value
+            continue
         if not value:  # blank = "leave unchanged" — a saved secret is never wiped by an empty field
             continue
         if key in SECRET_KEYS and keychain.set(key, str(value)):
@@ -158,11 +187,17 @@ def google_oauth_configured() -> bool:
     return bool(google_client_id() and google_client_secret())
 
 
+def auto_update_enabled() -> bool:
+    """Whether Tempo looks for a new release when it starts. On unless turned off."""
+    return _read_file().get("auto_update", True) is not False
+
+
 def public_settings() -> dict[str, Any]:
     """Settings safe for the UI — booleans for secrets, never the secret values."""
     s = load_settings()
     return {
         "model": s.get("model", DEFAULT_MODEL),
+        "auto_update": auto_update_enabled(),
         "together_key_set": bool(s.get("together_key")),
         "google_connected": bool(s.get("google_refresh_token") or s.get("google_access_token")),
         "google_oauth_configured": google_oauth_configured(),

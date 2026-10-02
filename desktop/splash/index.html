@@ -22,7 +22,7 @@
       @keyframes spin { to { transform: rotate(360deg); } }
       h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; letter-spacing: .2px; }
       p { font-size: 13px; color: var(--muted); margin: 0; }
-      /* Shown by main.rs if the sidecar never comes up. */
+      /* Shown by desktop/main.py if the server never comes up. */
       #failed { display: none; max-width: 380px; }
       #failed code {
         display: block; margin-top: 10px; font-size: 11px; color: var(--muted);
@@ -43,7 +43,7 @@
         <h1>Tempo couldn’t start its server</h1>
         <p>
           The local server didn’t come up. Check the log for details, then reopen Tempo.
-          <code>~/.tempo/logs/tempo-server.log</code>
+          <code>~/.tempo/logs/tempo.log</code>
         </p>
       </div>
     </div>
