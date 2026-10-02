@@ -120,11 +120,11 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">Tempo<span>Together AI · Google Calendar</span></div>
+      <div class="brand">Tempo<span>Together AI · Google Calendar · Gmail drafts</span></div>
 
       <div class="pills">
         <span class="pill" id="pill-together"><span class="dot"></span>Together</span>
-        <span class="pill" id="pill-google"><span class="dot"></span>Calendar</span>
+        <span class="pill" id="pill-google"><span class="dot"></span>Google</span>
       </div>
 
       <div class="spacer"></div>
@@ -136,7 +136,7 @@
           <input id="together_key" type="password" placeholder="leave blank to keep current" />
         </div>
         <div class="field">
-          <label>Google Calendar</label>
+          <label>Google (Calendar + Gmail drafts)</label>
           <div id="google-controls"></div>
         </div>
         <div class="field">
@@ -184,7 +184,7 @@
               <span class="pill" id="or-pill-claude"><span class="dot"></span><span id="or-claude-label">Claude Code</span></span>
               <span class="pill" id="or-pill-gmail"><span class="dot"></span>Gmail drafts</span>
             </div>
-            <button class="secondary small" id="or-reconnect" hidden>Reconnect Google</button>
+            <button class="secondary small" id="or-reconnect" hidden>Connect Google</button>
           </div>
           <div class="hint" id="or-status-msg"></div>
           <div class="inline-err" id="or-load-err" hidden></div>
@@ -288,7 +288,7 @@
         el.append(span, btn);
       } else if (s.google_oauth_configured) {
         const btn = document.createElement("button");
-        btn.textContent = "Connect Google Calendar";
+        btn.textContent = "Connect Google";
         btn.addEventListener("click", (e) => {
           e.preventDefault();
           window.location.href = "/api/google/login";
@@ -667,7 +667,10 @@
         $("or-pill-claude").classList.toggle("on", !!c.available);
         $("or-claude-label").textContent = c.available && version ? `Claude Code ${version[0]}` : "Claude Code";
         $("or-pill-gmail").classList.toggle("on", !!g.can_draft);
-        $("or-reconnect").hidden = !(g.connected && !g.can_draft);
+        // One Google sign-in covers Calendar and Gmail drafts: "Connect" the first time,
+        // "Reconnect" when an older sign-in is missing the drafts permission.
+        $("or-reconnect").hidden = !!g.can_draft;
+        $("or-reconnect").textContent = g.connected ? "Reconnect Google" : "Connect Google";
         const msgs = [];
         if (!c.available) msgs.push(c.message || "Claude Code isn't available.");
         if (!g.can_draft) msgs.push(gmailWhy());

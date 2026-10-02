@@ -118,7 +118,7 @@ def get_valid_access_token() -> str:
     if access_token:  # manually pasted / env token, no refresh available
         return access_token
     raise RuntimeError(
-        "Google Calendar not connected — click “Connect Google Calendar” in Settings."
+        "Google not connected — click “Connect Google” in Settings."
     )
 
 
