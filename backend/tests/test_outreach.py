@@ -569,6 +569,16 @@ def test_status(client, tmp_path, monkeypatch):
         "connected": True, "can_draft": True, "message": None}
 
 
+def test_settings_tell_the_sidebar_about_gmail_drafts(client):
+    """The sidebar is the only Google control, so it needs to know when to offer Reconnect."""
+    assert client.get("/api/settings").json()["google_can_draft"] is False
+    _connect(scopes=None)  # a sign-in from before Outreach: Calendar only
+    assert client.get("/api/settings").json()["google_can_draft"] is False
+    _connect()
+    assert client.get("/api/settings").json()["google_can_draft"] is True
+    assert client.post("/api/google/disconnect").json()["google_can_draft"] is False
+
+
 def test_auth_url_asks_for_gmail_compose():
     assert "gmail.compose" in google_oauth.build_auth_url("st") and "calendar.events" in google_oauth.build_auth_url("st")
 

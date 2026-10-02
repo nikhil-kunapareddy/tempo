@@ -102,14 +102,19 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+def _settings_view(settings: dict[str, Any]) -> dict[str, Any]:
+    """public_settings plus whether the Google sign-in allows Gmail drafts, for the sidebar."""
+    return {**settings, "google_can_draft": google_oauth.can_draft()}
+
+
 @app.get("/api/settings")
 def get_settings() -> dict[str, Any]:
-    return config.public_settings()
+    return _settings_view(config.public_settings())
 
 
 @app.post("/api/settings")
 def post_settings(body: SettingsIn) -> dict[str, Any]:
-    return config.save_settings(body.model_dump(exclude_none=True))
+    return _settings_view(config.save_settings(body.model_dump(exclude_none=True)))
 
 
 @app.get("/api/models")
@@ -161,7 +166,7 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
 @app.post("/api/google/disconnect")
 def google_disconnect() -> dict[str, Any]:
     google_oauth.disconnect()
-    return config.public_settings()
+    return _settings_view(config.public_settings())
 
 
 @app.post("/api/chat")

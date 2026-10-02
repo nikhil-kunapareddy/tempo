@@ -184,7 +184,6 @@
               <span class="pill" id="or-pill-claude"><span class="dot"></span><span id="or-claude-label">Claude Code</span></span>
               <span class="pill" id="or-pill-gmail"><span class="dot"></span>Gmail drafts</span>
             </div>
-            <button class="secondary small" id="or-reconnect" hidden>Connect Google</button>
           </div>
           <div class="hint" id="or-status-msg"></div>
           <div class="inline-err" id="or-load-err" hidden></div>
@@ -275,8 +274,23 @@
       el.innerHTML = "";
       if (s.google_connected) {
         const span = document.createElement("span");
-        span.textContent = "Connected ✓  ";
-        span.style.cssText = "color:var(--ok);font-size:13px;margin-right:8px";
+        // The one place Google is connected. A sign-in from before Outreach has Calendar but
+        // not the drafts permission, so it gets a Reconnect here rather than a second button
+        // somewhere else.
+        const drafts = s.google_can_draft !== false;
+        span.textContent = drafts ? "Connected ✓  " : "Calendar only  ";
+        span.style.cssText = `color:var(${drafts ? "--ok" : "--muted"});font-size:13px;margin-right:8px`;
+        el.append(span);
+        if (!drafts) {
+          const re = document.createElement("button");
+          re.textContent = "Reconnect for Gmail drafts";
+          re.style.marginRight = "8px";
+          re.addEventListener("click", (e) => {
+            e.preventDefault();
+            window.location.href = "/api/google/login";
+          });
+          el.append(re);
+        }
         const btn = document.createElement("button");
         btn.textContent = "Disconnect";
         btn.className = "secondary";
@@ -285,7 +299,7 @@
           await fetch("/api/google/disconnect", { method: "POST" });
           refreshStatus();
         });
-        el.append(span, btn);
+        el.append(btn);
       } else if (s.google_oauth_configured) {
         const btn = document.createElement("button");
         btn.textContent = "Connect Google";
@@ -667,21 +681,12 @@
         $("or-pill-claude").classList.toggle("on", !!c.available);
         $("or-claude-label").textContent = c.available && version ? `Claude Code ${version[0]}` : "Claude Code";
         $("or-pill-gmail").classList.toggle("on", !!g.can_draft);
-        // One Google sign-in covers Calendar and Gmail drafts: "Connect" the first time,
-        // "Reconnect" when an older sign-in is missing the drafts permission.
-        $("or-reconnect").hidden = !!g.can_draft;
-        $("or-reconnect").textContent = g.connected ? "Reconnect Google" : "Connect Google";
         const msgs = [];
         if (!c.available) msgs.push(c.message || "Claude Code isn't available.");
         if (!g.can_draft) msgs.push(gmailWhy());
         $("or-status-msg").textContent = msgs.join(" ");
         syncButtons();
       }
-
-      $("or-reconnect").addEventListener("click", (e) => {
-        e.preventDefault();
-        window.location.href = "/api/google/login";
-      });
 
       // -- resume --------------------------------------------------------------------------
       function renderResume() {
