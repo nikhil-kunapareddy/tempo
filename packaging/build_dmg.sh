@@ -6,7 +6,8 @@
 #   2. PyInstaller-freeze the whole app — server, Cocoa shell and web UI — into Tempo.app.
 #   3. Code-sign: Developer ID inside-out when an identity is set, ad-hoc otherwise.
 #   4. Tar the signed .app into the update archive installed copies download, and sign it.
-#   5. Wrap the .app in a compressed .dmg via hdiutil; with a Developer ID, sign → notarize →
+#   5. Wrap the .app in a compressed .dmg via hdiutil, with the window layout from
+#      desktop/installer/ (background + icon positions); with a Developer ID, sign → notarize →
 #      staple.
 #
 # Output, in packaging/dist/:
@@ -146,19 +147,31 @@ else
 fi
 
 echo "==> [5/5] hdiutil: wrapping into .dmg"
+# What the user drags onto. Standard install gesture, no Finder scripting.
 ln -s /Applications "$STAGING/Applications"
+# The window: a background at 1x and 2x in one TIFF, and the Finder layout that places the two
+# icons on it. hdiutil builds the image straight from this directory and never mounts it, so
+# nothing can lay the window out at build time; the layout Finder would have written is checked
+# in instead (desktop/installer/dmg-layout.py says how to regenerate it).
+INSTALLER="$ROOT/desktop/installer"
+tiffutil -cathidpicheck "$INSTALLER/dmg-background.png" "$INSTALLER/dmg-background@2x.png" \
+  -out "$STAGING/.background.tiff" >/dev/null
+cp "$INSTALLER/dmg-DS_Store" "$STAGING/.DS_Store"
 DMG="$DIST/${APP}_${VERSION}_${ARCH}.dmg"
 rm -f "$DMG"
 # Clear any stale mount so our image doesn't mount as "$APP 1".
 [ -d "/Volumes/$APP" ] && hdiutil detach "/Volumes/$APP" -force >/dev/null 2>&1 || true
+# The volume must stay named "Tempo": the layout finds .background.tiff by its path on it.
 hdiutil create -volname "$APP" -srcfolder "$STAGING" -ov -format UDZO \
   -imagekey zlib-level=9 "$DMG" >/dev/null
+hdiutil verify -quiet "$DMG"
 
 if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
   echo ""
   echo "    AD-HOC signed build — it runs, but Gatekeeper doesn't know the signer, so the first"
-  echo "    launch on each Mac needs right-click → Open (or System Settings → Privacy & Security"
-  echo "    → Open Anyway). Set APPLE_SIGNING_IDENTITY to sign with a Developer ID instead."
+  echo "    launch on each Mac needs System Settings → Privacy & Security → Open Anyway (or"
+  echo "    right-click → Open on macOS 14 and earlier). Set APPLE_SIGNING_IDENTITY to sign"
+  echo "    with a Developer ID instead."
 elif [ "${TEMPO_SKIP_NOTARIZE:-}" = "1" ]; then
   echo "    TEMPO_SKIP_NOTARIZE=1 — signing container, SKIPPING notarize (do not distribute)"
   codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"

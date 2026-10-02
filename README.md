@@ -1,4 +1,4 @@
-![Tempo](assets/image.png)
+![Tempo — Your calendar, handled.](assets/brand/banner.jpg)
 
 # Tempo
 
