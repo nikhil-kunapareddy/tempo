@@ -79,6 +79,7 @@
     .outreach-body[hidden] { display:none; }
     .section { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px;
                display:flex; flex-direction:column; gap:10px; min-width:0; }
+    .section[hidden] { display:none; }  /* .section's display:flex would otherwise beat [hidden] */
     .section h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0; }
     .section textarea, .grid input, .draft-card input, .draft-card textarea { background:var(--bg); }
     .row-line { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -94,21 +95,44 @@
                   max-height:220px; overflow:auto; background:var(--bg); border:1px solid var(--border);
                   border-radius:8px; padding:8px 10px; margin:8px 0 0; }
     details > summary { cursor:pointer; }
-    .grid-wrap { overflow-x:auto; }
-    textarea.csv { font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre; overflow-x:auto; }
-    table.grid { border-collapse:collapse; width:100%; min-width:1150px; }
-    .grid .f-about { min-width:260px; }
-    .grid .f-org, .grid .f-recruiter_email, .grid .f-website { min-width:160px; }
-    .grid .f-role, .grid .f-recruiter_name { min-width:130px; }
-    textarea.csv.over { border-color:var(--accent); }
-    .grid th { font-size:12px; color:var(--muted); font-weight:500; text-align:left; padding:0 4px 6px; }
-    .grid td { padding:3px 4px; vertical-align:middle; }
-    .grid input { padding:7px 9px; }
-    .grid td.st { font-size:12px; color:var(--muted); width:120px; white-space:nowrap; }
-    .grid td.st.ok { color:var(--ok); }
-    .grid td.st.bad { color:#ffd7dc; }
-    .grid td.rm { width:40px; text-align:right; }
-    .grid tr.err-row td { padding:0 4px 6px; }
+    /* The recipients sheet: a light spreadsheet surface inside the dark panel, drawn like Google
+       Sheets so copying to and from a real sheet feels like the same thing. */
+    .grid-wrap { overflow:auto; max-height:420px; border:1px solid #c4c7c5; border-radius:6px; background:#fff; }
+    .grid-wrap.over { box-shadow:0 0 0 2px var(--accent); }
+    table.grid { border-collapse:separate; border-spacing:0; min-width:1240px; width:100%;
+                 font-size:13px; color:#202124; table-layout:fixed; }
+    .grid th, .grid td { border-right:1px solid #e1e3e1; border-bottom:1px solid #e1e3e1; height:24px; }
+    .grid th { position:sticky; top:0; z-index:2; background:#f8f9fa; color:#444746; font-weight:500;
+               font-size:12px; text-align:left; padding:0 8px; white-space:nowrap; overflow:hidden;
+               text-overflow:ellipsis; border-bottom-color:#c4c7c5; }
+    .grid th .col { color:#80868b; font-weight:400; margin-right:6px; }
+    .grid td { padding:0; vertical-align:middle; background:#fff; }
+    .grid .rn { position:sticky; left:0; z-index:1; width:44px; background:#f8f9fa; color:#5f6368;
+                font-size:11px; text-align:center; padding:0; user-select:none; cursor:default;
+                font-variant-numeric:tabular-nums; border-right-color:#c4c7c5; }
+    .grid th.rn { z-index:3; }
+    .grid tr.sel-row .rn { background:#d3e3fd; color:#0b57d0; }
+    .grid .c-org, .grid .c-recruiter_email, .grid .c-website { width:170px; }
+    .grid .c-role, .grid .c-recruiter_name { width:150px; }
+    .grid .c-about { width:270px; }
+    .grid .c-st { width:110px; }
+    .grid .c-rm { width:34px; }
+    .grid td.cell { position:relative; cursor:cell; }
+    .grid td.cell input { display:block; width:100%; height:24px; border:0; border-radius:0; padding:0 6px;
+                          background:transparent; color:#202124; font:13px/24px -apple-system,BlinkMacSystemFont,sans-serif;
+                          outline:none; caret-color:#1a73e8; text-overflow:ellipsis; }
+    .grid td.cell input::placeholder { color:#9aa0a6; }
+    .grid td.cell.in-range { background:#e8f0fe; }
+    .grid td.cell.active::after { content:""; position:absolute; inset:-1px; border:2px solid #1a73e8;
+                                  pointer-events:none; z-index:1; }
+    .grid td.st { font-size:12px; color:#5f6368; padding:0 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .grid td.st.ok { color:#188038; }
+    .grid td.st.bad { color:#d93025; }
+    .grid td.rm { text-align:center; }
+    .grid td.rm button { background:transparent; border:0; color:#9aa0a6; padding:0 6px; font-size:15px; line-height:22px; }
+    .grid td.rm button:hover { color:#d93025; }
+    .grid tr.err-row td { background:#fce8e6; padding:3px 8px; height:auto; }
+    .grid tr.err-row .inline-err { color:#a50e0e; }
     .drafts { display:flex; flex-direction:column; gap:8px; }
     .draft-card { border:1px solid var(--border); border-radius:10px; }
     .draft-card > summary { list-style:none; display:flex; align-items:center; gap:8px; padding:10px 12px; }
@@ -222,24 +246,20 @@
 
             <section class="section">
               <h3>Recipients</h3>
-              <label class="hint" for="or-csv">Paste rows from Excel, Sheets or a CSV — or import the file. Tempo works out which column is the org, contact, email and website; a header row helps but isn't needed.</label>
-              <textarea id="or-csv" class="csv" rows="5" spellcheck="false" autocomplete="off"
-                placeholder="Superluminal Medicines Inc. - AI-driven GPCR drug design (Boston)&#9;https://www.superluminalrx.com/&#9;Georgia McGaughey&#10;&#10;org,role,contact name,contact email,website&#10;Acme Robotics,Data Engineer,Ana Lopez,ana@acme.com,https://acme.example"></textarea>
-              <div class="row-line">
-                <button class="secondary small" id="or-csv-apply">Apply</button>
-                <input type="file" id="or-csv-file" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden />
-                <button class="secondary small" id="or-csv-import">Import file…</button>
-                <span class="hint" id="or-csv-note">Replaces the table below. Rows that match an existing one keep their draft.</span>
-              </div>
-              <div class="inline-err" id="or-csv-err" hidden></div>
-              <div class="grid-wrap">
-                <table class="grid">
-                  <thead><tr><th class="f-org">Org</th><th class="f-role">Role</th><th class="f-recruiter_name">Contact name</th><th class="f-recruiter_email">Contact email</th><th class="f-about">About</th><th class="f-website">Website</th><th>Status</th><th></th></tr></thead>
+              <div class="hint">Paste straight from Excel or Sheets into any cell — or import the file. Tempo works out which column is the org, contact, email and website.</div>
+              <div class="grid-wrap" id="or-grid-wrap">
+                <table class="grid" aria-label="Recipients">
+                  <thead><tr><th class="rn" aria-label="Row"></th><th class="c-org"><span class="col">A</span>Org</th><th class="c-role"><span class="col">B</span>Role</th><th class="c-recruiter_name"><span class="col">C</span>Contact name</th><th class="c-recruiter_email"><span class="col">D</span>Contact email</th><th class="c-about"><span class="col">E</span>About</th><th class="c-website"><span class="col">F</span>Website</th><th class="c-st">Status</th><th class="c-rm" aria-label="Remove"></th></tr></thead>
                   <tbody id="or-rows"></tbody>
                 </table>
               </div>
+              <div class="inline-err" id="or-grid-err" hidden></div>
               <div class="row-line">
                 <button class="secondary small" id="or-add-row">Add row</button>
+                <input type="file" id="or-import-file" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden />
+                <button class="secondary small" id="or-import">Import file…</button>
+                <span class="hint" id="or-grid-note"></span>
+                <span class="spacer"></span>
                 <span class="hint" id="or-save-note"></span>
               </div>
               <div class="inline-err" id="or-save-err" hidden></div>
@@ -553,6 +573,7 @@
       const rowErrors = {};           // row key -> why its last generate failed
       const savingIds = new Set();
       const rowEls = new Map();       // row key -> {tr, st, errTr, inputs}
+      const keyToId = {};             // row key -> server id, so an undo can't lose an id
       const cards = {};               // row id -> card elements
       let running = false, stopRequested = false, savingAll = false, importing = false;
 
@@ -636,6 +657,7 @@
             attach_resume: attachResume,
           });
           assignIds(sent, state.rows || []);
+          rememberIds();
           mergeDrafts(state.drafts || {}, sentAt);
           $("or-save-note").textContent = "Saved";
           showErr($("or-save-err"), "");
@@ -797,47 +819,143 @@
 
       // -- recipients grid ------------------------------------------------------------------
       // Rebuilt only when rows are added or removed; typing edits the row object in place.
-      function renderGrid(focusKey) {
+      // -- the recipients sheet ----------------------------------------------------------------
+      // Behaves like a spreadsheet: arrows, Enter and Tab move between cells, Shift extends a
+      // range, a block pasted from Excel or Sheets lands where the cursor is, Cmd+C copies a
+      // range as TSV that pastes back into a sheet cell-for-cell, Delete clears it, and Cmd+Z
+      // undoes grid changes. Each cell is a plain <input>; `rows` stays the source of truth.
+      //
+      // Undo rule: Cmd+Z in a cell whose text you've changed since entering it is the input's
+      // own undo (your typing). Otherwise it undoes the last grid change — a paste, clear, cut,
+      // added or removed row, import, or a finished cell edit (one you moved away from).
+      const NCOLS = FIELDS.length;
+      const HISTORY_MAX = 50;
+      let cellEls = [];               // [r][c] -> {td, input}
+      let anchor = { r: 0, c: 0 };    // the active cell
+      let extent = { r: 0, c: 0 };    // the opposite corner of the selected range
+      let undoStack = [], redoStack = [];
+      let editCell = null;            // {row, field, input, start}: the cell being edited
+      let rendering = false;          // renderGrid is replacing elements; ignore their focus events
+      let dragging = false, pasting = false;
+
+      const clampR = (r) => Math.max(0, Math.min(rows.length - 1, r));
+      const clampC = (c) => Math.max(0, Math.min(NCOLS - 1, c));
+      const isMulti = () => anchor.r !== extent.r || anchor.c !== extent.c;
+      const range = () => ({
+        r0: Math.min(anchor.r, extent.r), r1: Math.max(anchor.r, extent.r),
+        c0: Math.min(anchor.c, extent.c), c1: Math.max(anchor.c, extent.c),
+      });
+      const cellAt = (r, c) => (cellEls[r] && cellEls[r][c]) || null;
+      const activeInput = () => (cellAt(anchor.r, anchor.c) || {}).input;
+      const isCell = (el) => !!(el && el.matches && el.matches("td.cell input"));
+
+      function rememberIds() {
+        rows.forEach((r) => { if (r.id) keyToId[r.key] = r.id; });
+      }
+
+      // -- history ------------------------------------------------------------------------
+      const snapshot = () => ({ rows: rows.map((r) => ({ ...r })), anchor: { ...anchor }, extent: { ...extent } });
+
+      function remember(entry) {
+        undoStack.push(entry || snapshot());
+        if (undoStack.length > HISTORY_MAX) undoStack.shift();
+        redoStack = [];
+      }
+
+      // A finished edit in a cell becomes one undo step, like any other grid change.
+      function commitEdit() {
+        const e = editCell;
+        if (!e || e.input.value === e.start) return;
+        const entry = snapshot();
+        const r = rows.indexOf(e.row), c = FIELDS.indexOf(e.field);
+        if (r >= 0) {
+          entry.rows[r][e.field] = e.start;
+          entry.anchor = { r, c };
+          entry.extent = { r, c };
+        }
+        remember(entry);
+        e.start = e.input.value;
+      }
+
+      function restore(entry) {
+        rows = entry.rows.map((r) => ({ ...r, id: r.id || keyToId[r.key] || null }));
+        if (!rows.length) rows.push(newRow());
+        anchor = { ...entry.anchor };
+        extent = { ...entry.extent };
+        renderGrid(true);
+        markDirty();
+        save();
+        renderDrafts();
+      }
+
+      function undo() {
+        if (!undoStack.length) return;
+        redoStack.push(snapshot());
+        restore(undoStack.pop());
+        $("or-grid-note").textContent = "Undone.";
+      }
+
+      function redo() {
+        if (!redoStack.length) return;
+        undoStack.push(snapshot());
+        restore(redoStack.pop());
+        $("or-grid-note").textContent = "Redone.";
+      }
+
+      // -- drawing --------------------------------------------------------------------------
+      function renderGrid(focus) {
+        rendering = true;
         const tbody = $("or-rows");
         tbody.textContent = "";
         rowEls.clear();
-        rows.forEach((row) => {
+        cellEls = [];
+        rows.forEach((row, r) => {
           const tr = document.createElement("tr");
+          const rn = document.createElement("td");
+          rn.className = "rn";
+          rn.textContent = r + 1;
+          rn.title = "Select row";
+          rn.dataset.r = r;
+          tr.append(rn);
           const inputs = {};
-          FIELDS.forEach((f) => {
+          cellEls[r] = [];
+          FIELDS.forEach((f, c) => {
             const td = document.createElement("td");
-            td.className = "f-" + f;
+            td.className = "cell c-" + f;
+            td.dataset.r = r;
+            td.dataset.c = c;
             const input = document.createElement("input");
             input.value = row[f];
-            input.placeholder = PLACEHOLDERS[f];
-            input.setAttribute("aria-label", LABELS[f]);
+            // Hints on the first row only: on every row they'd read as data in a sheet.
+            if (r === 0) input.placeholder = PLACEHOLDERS[f];
+            input.setAttribute("aria-label", `${LABELS[f]}, row ${r + 1}`);
             input.autocomplete = "off";
-            if (f === "recruiter_email") input.type = "email";
+            input.spellcheck = false;
+            // type stays "text": email/url inputs hide the caret position, which the arrow keys need.
+            if (f === "recruiter_email") input.inputMode = "email";
             if (f === "website") input.inputMode = "url";
+            input.dataset.r = r;
+            input.dataset.c = c;
             input.addEventListener("input", () => {
               row[f] = input.value;
+              // Typing with a range selected edits just the active cell.
+              if (isMulti()) { extent = { ...anchor }; paintSelection(); }
               markDirty();
               if (row.id && cards[row.id]) updateCard(row.id);
             });
-            if (f === FIELDS[FIELDS.length - 1]) {
-              input.addEventListener("keydown", (e) => {
-                if (e.key === "Enter" && rows[rows.length - 1] === row) {
-                  e.preventDefault();
-                  addRow();
-                }
-              });
-            }
             td.append(input);
             tr.append(td);
             inputs[f] = input;
+            cellEls[r][c] = { td, input };
           });
           const st = document.createElement("td");
           st.className = "st";
           const rmTd = document.createElement("td");
           rmTd.className = "rm";
-          const rm = button("×", "icon");
-          rm.setAttribute("aria-label", "Remove row");
+          const rm = button("×");
+          rm.setAttribute("aria-label", `Remove row ${r + 1}`);
           rm.title = "Remove row";
+          rm.tabIndex = -1;  // Tab moves between cells, not onto every row's × button
           rm.addEventListener("click", (e) => {
             e.preventDefault();
             removeRow(row);
@@ -848,21 +966,84 @@
           rowEls.set(row.key, { tr, st, errTr: null, inputs });
           renderRowStatus(row);
         });
-        if (focusKey && rowEls.get(focusKey)) rowEls.get(focusKey).inputs.org.focus();
+        anchor = { r: clampR(anchor.r), c: clampC(anchor.c) };
+        extent = { r: clampR(extent.r), c: clampC(extent.c) };
+        editCell = null;
+        rendering = false;
+        paintSelection();
+        if (focus) focusActive();
       }
 
-      function addRow() {
-        const row = newRow();
-        rows.push(row);
-        renderGrid(row.key);
+      function paintSelection() {
+        const { r0, r1, c0, c1 } = range();
+        const multi = isMulti();
+        cellEls.forEach((cells, r) => {
+          cells.forEach(({ td }, c) => {
+            td.classList.toggle("active", r === anchor.r && c === anchor.c);
+            td.classList.toggle("in-range", multi && r >= r0 && r <= r1 && c >= c0 && c <= c1);
+          });
+          const row = rows[r];
+          const els = row && rowEls.get(row.key);
+          if (els) els.tr.classList.toggle("sel-row", r >= r0 && r <= r1);
+        });
+      }
+
+      function scrollToCell(r, c) {
+        const el = cellAt(r, c);
+        if (el) el.td.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+
+      function focusActive() {
+        const input = activeInput();
+        if (!input) return;
+        input.focus({ preventScroll: true });
+        input.select();  // arriving in a cell selects it, so typing replaces it (as in a sheet)
+        scrollToCell(anchor.r, anchor.c);
+      }
+
+      // Move the active cell, or with `extend` grow the range towards (r, c).
+      function moveTo(r, c, extend) {
+        commitEdit();
+        r = clampR(r);
+        c = clampC(c);
+        if (extend) {
+          extent = { r, c };
+          paintSelection();
+          scrollToCell(r, c);
+          return;
+        }
+        anchor = { r, c };
+        extent = { r, c };
+        paintSelection();
+        focusActive();
+      }
+
+      // -- rows -----------------------------------------------------------------------------
+      function ensureRow(i) {
+        while (rows.length <= i) rows.push(newRow());
+        return rows[i];
+      }
+
+      function addRow(focus = true) {
+        commitEdit();
+        remember();
+        rows.push(newRow());
+        if (focus) {
+          anchor = { r: rows.length - 1, c: 0 };
+          extent = { ...anchor };
+        }
+        renderGrid(focus);
         markDirty();
       }
 
       function removeRow(row) {
+        commitEdit();
+        remember();
         rows = rows.filter((r) => r !== row);
         delete rowErrors[row.key];
         if (!rows.length) rows.push(newRow());
-        renderGrid();
+        extent = { ...anchor };
+        renderGrid(true);
         markDirty();
         renderDrafts();
       }
@@ -872,26 +1053,359 @@
         addRow();
       });
 
-      // Pasted cells and imported files replace the table. Parsing is the server's (POST
-      // /api/outreach/import and /import-file), so a quoted comma, a spreadsheet's tabs or an
-      // .xlsx mean the same thing here as in the tests.
+      // -- clipboard ------------------------------------------------------------------------
+      function rangeTSV() {
+        const { r0, r1, c0, c1 } = range();
+        // Quoted only when needed, the way Excel and Sheets write TSV themselves.
+        const q = (v) => (/[\t\n"]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+        const lines = [];
+        for (let r = r0; r <= r1; r++) {
+          const cells = [];
+          for (let c = c0; c <= c1; c++) cells.push(q(String(rows[r][FIELDS[c]] || "")));
+          lines.push(cells.join("\t"));
+        }
+        return lines.join("\n");
+      }
+
+      // Whether Cmd+C/X in this cell means the grid's cells rather than the text selected in it:
+      // a range, a collapsed caret, or the whole value selected (which is how a cell is entered).
+      function gridClipboard(input) {
+        if (isMulti()) return true;
+        const s = input.selectionStart, e = input.selectionEnd;
+        return s === e || (s === 0 && e === input.value.length);
+      }
+
+      // Last resort when the copy event can't carry our data (an empty active cell has nothing
+      // for WebKit's copy command to act on): a hidden textarea and execCommand.
+      function copyFallback(text) {
+        const back = document.activeElement;
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+        document.body.append(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        ta.remove();
+        if (back && back.focus) back.focus({ preventScroll: true });
+        if (!ok && navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(() => {});
+        }
+      }
+
+      function clearRange() {
+        commitEdit();
+        const { r0, r1, c0, c1 } = range();
+        const before = snapshot();
+        let changed = false;
+        for (let r = r0; r <= r1; r++) {
+          for (let c = c0; c <= c1; c++) {
+            const f = FIELDS[c];
+            if (rows[r][f]) { rows[r][f] = ""; changed = true; }
+            const el = cellAt(r, c);
+            if (el) el.input.value = "";
+          }
+        }
+        if (!changed) return;
+        remember(before);
+        for (let r = r0; r <= r1; r++) {
+          const row = rows[r];
+          if (row.id && cards[row.id]) updateCard(row.id);
+        }
+        if (editCell) editCell.start = editCell.input.value;
+        markDirty();
+      }
+
+      // Links from a sheet's HTML clipboard: Google Sheets hyperlinks the org name, so a row
+      // with no website column can still get one. Returns one href (or "") per non-empty row.
+      function htmlRowLinks(html) {
+        if (!html || !/<table/i.test(html)) return null;
+        let doc;
+        try { doc = new DOMParser().parseFromString(html, "text/html"); } catch (e) { return null; }
+        return [...doc.querySelectorAll("tr")]
+          .filter((tr) => tr.textContent.trim())
+          .map((tr) => {
+            const first = tr.querySelector("td, th");
+            const a = first && first.querySelector("a[href]");
+            const href = a ? a.getAttribute("href") || "" : "";
+            return /^https?:\/\//i.test(href) ? href : "";
+          });
+      }
+
+      async function pasteBlock(input, text, html) {
+        const r = +input.dataset.r, c = +input.dataset.c;
+        const lines = text.split("\n");
+        const filled = lines.filter((l) => l.trim());
+        const multiCol = text.includes("\t") || (filled.length > 1 &&
+          (filled.every((l) => l.includes(",")) || filled.every((l) => /\S {2,}\S/.test(l))));
+        commitEdit();
+        showErr($("or-grid-err"), "");
+        if (!multiCol) {
+          // One column of values: fill down from this cell, as a sheet does.
+          remember();
+          lines.forEach((value, i) => { ensureRow(r + i)[FIELDS[c]] = value.trim(); });
+          finishPaste(r, r + lines.length - 1, c, c);
+          return;
+        }
+        if (pasting) return;
+        pasting = true;
+        $("or-grid-note").textContent = "Pasting…";
+        try {
+          const parsed = (await api("POST", "/api/outreach/parse", { csv: text })).rows || [];
+          // The parser drops a header row; line the HTML rows up with what's left.
+          let links = htmlRowLinks(html);
+          if (links && links.length === parsed.length + 1) links = links.slice(1);
+          if (links && links.length !== parsed.length) links = null;
+          remember();
+          parsed.forEach((p, i) => {
+            const row = ensureRow(r + i);
+            FIELDS.forEach((f) => { row[f] = p[f] || ""; });
+            if (!row.website && links && links[i]) row.website = links[i];
+          });
+          finishPaste(r, r + parsed.length - 1, 0, NCOLS - 1);
+        } catch (err) {
+          $("or-grid-note").textContent = "";
+          showErr($("or-grid-err"), "Couldn't paste: " + err.message);
+        } finally {
+          pasting = false;
+        }
+      }
+
+      function finishPaste(r0, r1, c0, c1) {
+        anchor = { r: r0, c: c0 };
+        extent = { r: r1, c: c1 };
+        renderGrid(true);
+        const n = r1 - r0 + 1;
+        $("or-grid-note").textContent = `Pasted ${n} row${n === 1 ? "" : "s"}.`;
+        markDirty();
+        save();
+        renderDrafts();
+      }
+
+      // -- events (delegated: the cells are rebuilt whenever rows are added or removed) -----------
+      const tbody = $("or-rows");
+
+      tbody.addEventListener("focusin", (e) => {
+        const input = e.target;
+        if (rendering || !isCell(input)) return;
+        const r = +input.dataset.r, c = +input.dataset.c;
+        if (anchor.r !== r || anchor.c !== c) {
+          anchor = { r, c };
+          extent = { r, c };
+          paintSelection();
+        }
+        editCell = { row: rows[r], field: FIELDS[c], input, start: input.value };
+      });
+
+      tbody.addEventListener("focusout", (e) => {
+        if (!rendering && isCell(e.target)) commitEdit();
+      });
+
+      tbody.addEventListener("keydown", (e) => {
+        const input = e.target;
+        if (!isCell(input)) return;
+        const r = +input.dataset.r, c = +input.dataset.c;
+        const len = input.value.length;
+        const s = input.selectionStart, en = input.selectionEnd;
+        const whole = s === 0 && en === len;  // also true for an empty cell
+        const meta = e.metaKey || e.ctrlKey;
+
+        if (meta && !e.altKey) {
+          const k = e.key.toLowerCase();
+          if (k === "z") {
+            if (editCell && editCell.input === input && input.value !== editCell.start) return;  // the input's own undo
+            e.preventDefault();
+            if (e.shiftKey) redo(); else undo();
+          } else if (k === "y" && e.ctrlKey) {
+            e.preventDefault();
+            redo();
+          } else if (k === "a") {
+            e.preventDefault();
+            commitEdit();
+            anchor = { r: 0, c: 0 };
+            extent = { r: rows.length - 1, c: NCOLS - 1 };
+            paintSelection();
+            const a = activeInput();
+            if (a && a !== input) a.focus({ preventScroll: true });
+          } else if ((k === "c" || k === "x") && gridClipboard(input)) {
+            if (input.value) {
+              input.select();  // gives WebKit's copy command something to act on; the copy/cut handlers below swap in the TSV
+            } else {
+              e.preventDefault();
+              copyFallback(rangeTSV());
+              if (k === "x") clearRange();
+            }
+          }
+          return;  // Cmd+V arrives as a paste event
+        }
+
+        switch (e.key) {
+          case "ArrowUp":
+          case "ArrowDown": {
+            e.preventDefault();
+            const dr = e.key === "ArrowUp" ? -1 : 1;
+            if (e.shiftKey) moveTo(extent.r + dr, extent.c, true);
+            else moveTo(r + dr, c);
+            return;
+          }
+          case "ArrowLeft":
+          case "ArrowRight": {
+            const left = e.key === "ArrowLeft";
+            if (e.shiftKey) {
+              if (!isMulti() && !whole) return;  // selecting text inside the cell
+              e.preventDefault();
+              moveTo(extent.r, extent.c + (left ? -1 : 1), true);
+              return;
+            }
+            const atEdge = whole || (left ? en === 0 : s === len);
+            const target = clampC(c + (left ? -1 : 1));
+            if ((!atEdge && !isMulti()) || target === c) return;  // moving the caret
+            e.preventDefault();
+            moveTo(r, target);
+            return;
+          }
+          case "Enter": {
+            e.preventDefault();
+            if (e.shiftKey) { moveTo(r - 1, c); return; }
+            if (r === rows.length - 1) addRow(false);
+            moveTo(r + 1, c);
+            return;
+          }
+          case "Tab": {
+            if (e.shiftKey) {
+              if (r === 0 && c === 0) return;  // let focus leave the sheet
+              e.preventDefault();
+              if (c === 0) moveTo(r - 1, NCOLS - 1);
+              else moveTo(r, c - 1);
+              return;
+            }
+            e.preventDefault();
+            if (c < NCOLS - 1) { moveTo(r, c + 1); return; }
+            if (r === rows.length - 1) addRow(false);
+            moveTo(r + 1, 0);
+            return;
+          }
+          case "Escape": {
+            if (editCell && editCell.input === input && input.value !== editCell.start) {
+              e.preventDefault();
+              input.value = editCell.start;
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              input.select();
+            }
+            if (isMulti()) { extent = { ...anchor }; paintSelection(); }
+            return;
+          }
+          case "Delete":
+          case "Backspace": {
+            if (!isMulti()) return;  // inside one cell, delete characters as usual
+            e.preventDefault();
+            clearRange();
+            return;
+          }
+        }
+      });
+
+      tbody.addEventListener("copy", (e) => {
+        if (!isCell(e.target) || !gridClipboard(e.target) || !e.clipboardData) return;
+        e.clipboardData.setData("text/plain", rangeTSV());
+        e.preventDefault();
+      });
+
+      tbody.addEventListener("cut", (e) => {
+        if (!isCell(e.target) || !gridClipboard(e.target) || !e.clipboardData) return;
+        e.clipboardData.setData("text/plain", rangeTSV());
+        e.preventDefault();
+        clearRange();
+      });
+
+      tbody.addEventListener("paste", (e) => {
+        const input = e.target;
+        if (!isCell(input) || !e.clipboardData) return;
+        const text = (e.clipboardData.getData("text/plain") || "").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+        if (!text.includes("\t") && !text.includes("\n")) return;  // an ordinary paste into this cell
+        e.preventDefault();
+        pasteBlock(input, text, e.clipboardData.getData("text/html") || "");
+      });
+
+      tbody.addEventListener("mousedown", (e) => {
+        const td = e.target.closest && e.target.closest("td");
+        if (!td || !tbody.contains(td) || e.button !== 0) return;
+        if (td.classList.contains("rn")) {
+          // Row number: select the whole row (Shift extends from the current row).
+          e.preventDefault();
+          commitEdit();
+          const r = +td.dataset.r;
+          if (e.shiftKey) {
+            anchor = { r: anchor.r, c: 0 };
+            extent = { r, c: NCOLS - 1 };
+          } else {
+            anchor = { r, c: 0 };
+            extent = { r, c: NCOLS - 1 };
+          }
+          paintSelection();
+          const a = activeInput();
+          if (a) a.focus({ preventScroll: true });
+          return;
+        }
+        if (!td.classList.contains("cell")) return;
+        const r = +td.dataset.r, c = +td.dataset.c;
+        if (e.shiftKey) {
+          e.preventDefault();  // keep the active cell; just grow the range
+          extent = { r, c };
+          paintSelection();
+          return;
+        }
+        commitEdit();
+        anchor = { r, c };
+        extent = { r, c };
+        dragging = true;
+        paintSelection();
+      });
+
+      tbody.addEventListener("mouseover", (e) => {
+        if (!dragging) return;
+        const td = e.target.closest && e.target.closest("td.cell");
+        if (!td) return;
+        const r = +td.dataset.r, c = +td.dataset.c;
+        if (r === extent.r && c === extent.c) return;
+        extent = { r, c };
+        paintSelection();
+        const a = activeInput();
+        if (a && isMulti() && document.activeElement === a) {
+          const p = a.selectionStart || 0;
+          a.setSelectionRange(p, p);  // dragging across cells selects cells, not text
+        }
+      });
+
+      window.addEventListener("mouseup", () => { dragging = false; });
+
+      // -- importing a file -----------------------------------------------------------------
+      // The parsing is the server's (POST /api/outreach/import-file), so an .xlsx, a quoted
+      // comma or a sheet's tabs mean the same thing here as in the tests.
       async function importRows(path, body, done) {
         if (importing || running) return;
         importing = true;
         syncButtons();
-        showErr($("or-csv-err"), "");
+        showErr($("or-grid-err"), "");
         try {
+          commitEdit();
           if (!(await save())) throw new Error("The table couldn't be saved, so nothing was imported.");
+          const before = snapshot();
           const state = await api("POST", path, body);
+          remember(before);
           const n = (state.rows || []).length;
           rows = (state.rows || []).map(newRow);
           if (!rows.length) rows.push(newRow());
+          rememberIds();
           Object.keys(rowErrors).forEach((k) => delete rowErrors[k]);
+          anchor = { r: 0, c: 0 };
+          extent = { ...anchor };
           renderGrid();
           mergeDrafts(state.drafts || {}, ++seq);
-          $("or-csv-note").textContent = done(`${n} row${n === 1 ? "" : "s"}`);
+          $("or-grid-note").textContent = done(`${n} row${n === 1 ? "" : "s"}`);
         } catch (err) {
-          showErr($("or-csv-err"), err.message);
+          showErr($("or-grid-err"), err.message);
         } finally {
           importing = false;
           syncButtons();
@@ -899,40 +1413,36 @@
       }
 
       async function importFile(file) {
-        if (file.size > MAX_IMPORT_BYTES) return showErr($("or-csv-err"), "That file is over 10 MB.");
+        if (file.size > MAX_IMPORT_BYTES) return showErr($("or-grid-err"), "That file is over 10 MB.");
         let data;
         try {
           data = await readBase64(file);
         } catch (err) {
-          return showErr($("or-csv-err"), err.message);
+          return showErr($("or-grid-err"), err.message);
         }
         await importRows("/api/outreach/import-file", { filename: file.name, data_base64: data },
           (n) => `Imported ${n} from ${file.name}.`);
       }
 
-      $("or-csv-apply").addEventListener("click", (e) => {
+      $("or-import").addEventListener("click", (e) => {
         e.preventDefault();
-        importRows("/api/outreach/import", { csv: $("or-csv").value }, (n) => `Applied ${n}.`);
+        $("or-import-file").click();
       });
-      $("or-csv-import").addEventListener("click", (e) => {
-        e.preventDefault();
-        $("or-csv-file").click();
-      });
-      $("or-csv-file").addEventListener("change", (e) => {
+      $("or-import-file").addEventListener("change", (e) => {
         const file = e.target.files && e.target.files[0];
         e.target.value = "";  // so picking the same file again still fires
         if (file) importFile(file);
       });
-      // A file dropped on the paste box is imported; dragged text still drops in as text.
-      const csvBox = $("or-csv");
+      // A spreadsheet dropped anywhere on the sheet is imported.
+      const gridWrap = $("or-grid-wrap");
       const carriesFiles = (e) => !!(e.dataTransfer && [...e.dataTransfer.types].includes("Files"));
-      ["dragenter", "dragover"].forEach((t) => csvBox.addEventListener(t, (e) => {
+      ["dragenter", "dragover"].forEach((t) => gridWrap.addEventListener(t, (e) => {
         if (!carriesFiles(e)) return;
         e.preventDefault();
-        csvBox.classList.add("over");
+        gridWrap.classList.add("over");
       }));
-      ["dragleave", "drop"].forEach((t) => csvBox.addEventListener(t, () => csvBox.classList.remove("over")));
-      csvBox.addEventListener("drop", (e) => {
+      ["dragleave", "drop"].forEach((t) => gridWrap.addEventListener(t, () => gridWrap.classList.remove("over")));
+      gridWrap.addEventListener("drop", (e) => {
         const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if (!file) return;
         e.preventDefault();
@@ -961,7 +1471,7 @@
             els.errTr = document.createElement("tr");
             els.errTr.className = "err-row";
             const td = document.createElement("td");
-            td.colSpan = 6;
+            td.colSpan = FIELDS.length + 3;
             const div = document.createElement("div");
             div.className = "inline-err";
             td.append(div);
@@ -1289,8 +1799,7 @@
         const claudeOff = !!(status && status.claude && status.claude.available === false);
         const gen = $("or-generate");
         gen.disabled = running || claudeOff;
-        $("or-csv-apply").disabled = running || importing;
-        $("or-csv-import").disabled = running || importing;
+        $("or-import").disabled = running || importing;
         gen.title = claudeOff ? (status.claude.message || "Claude Code isn't available.") : "";
         $("or-stop").hidden = !running;
         $("or-stop").disabled = stopRequested;
@@ -1310,6 +1819,7 @@
             const state = await api("GET", "/api/outreach");
             rows = (state.rows || []).map(newRow);
             if (!rows.length) rows.push(newRow());
+            rememberIds();
             template = state.template || "";
             attachResume = state.attach_resume !== false;
             resume = state.resume || null;
