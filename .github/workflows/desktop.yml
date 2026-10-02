@@ -1,0 +1,97 @@
+name: Desktop
+
+# Every push to main and every pull request runs the tests on Apple Silicon and builds a .dmg
+# you can download from the run's summary. Pushing a `v*` tag skips the tests (the tagged
+# commit already passed them) and attaches the .dmg to the release `scripts/release.py`
+# created, along with the signed update archive and the latest.json installed copies read.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    # macOS, not Linux: the shell tests import pyobjc, which only installs on a Mac.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - run: .venv/bin/pytest
+
+  bundle:
+    name: installer (macOS arm64)
+    needs: [test]
+    # Also runs for tags, where the test job above is skipped.
+    if: ${{ !cancelled() && !failure() }}
+    # macos-15 runners are Apple Silicon, the only architecture Tempo ships for.
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      # Before the slow part: a tag that doesn't match desktop/__init__.py would build an app
+      # that reports the wrong version and is offered to everyone as an update forever.
+      - name: Check the tag matches the version
+        if: env.IS_RELEASE == 'true'
+        run: python scripts/release.py --check-tag "$GITHUB_REF_NAME"
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt pyinstaller
+      # Releases must carry the OAuth client and a signed update. Other builds take whatever
+      # secrets they can see: pull requests from forks and Dependabot see none, and still get
+      # a .dmg to try, just without Google sign-in or a signed update.
+      - name: Build
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TEMPO_UPDATE_PRIVATE_KEY: ${{ secrets.TEMPO_UPDATE_PRIVATE_KEY }}
+          TEMPO_ALLOW_NO_OAUTH: ${{ env.IS_RELEASE == 'true' && '0' || '1' }}
+          TEMPO_REQUIRE_UPDATE_SIGNATURE: ${{ env.IS_RELEASE == 'true' && '1' || '0' }}
+        run: bash packaging/build_dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tempo-macos-arm64
+          path: packaging/dist/*.dmg
+          if-no-files-found: error
+      # One platform, so latest.json is written right here rather than by a separate job that
+      # waits for every installer. It goes up in the same upload as the files it points at.
+      # The release itself must already exist (scripts/release.py creates it); this only adds
+      # to it, which is all the workflow token is allowed to do usefully.
+      - name: Attach to the release
+        if: env.IS_RELEASE == 'true'
+        working-directory: packaging/dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dmg="$(ls Tempo_*_arm64.dmg)"
+          archive="$(ls Tempo_*_arm64.app.tar.gz)"
+          ../../.venv/bin/python ../../scripts/update_manifest.py "$GITHUB_REF_NAME" "$archive" > latest.json
+          gh release upload "$GITHUB_REF_NAME" "$dmg" "$archive" "$archive.sig" latest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber

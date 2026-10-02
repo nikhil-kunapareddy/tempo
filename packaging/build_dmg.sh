@@ -1,45 +1,65 @@
 #!/usr/bin/env bash
-# Build Tempo.app + a drag-to-install .dmg (Apple Silicon).
+# Build Tempo.app, a drag-to-install .dmg and a signed update archive (Apple Silicon).
 #
 #   1. Bake the Google OAuth client into packaging/oauth_client.json (a packaged app has no
 #      repo-root .env, so without this "Connect Google Calendar" is dead on arrival).
-#   2. PyInstaller-freeze the server into a standalone onedir bundle.
-#   3. Stage it at desktop/binaries/sidecar/ for Tauri's `resources` slot (+ sign its Mach-Os).
-#   4. `tauri build --bundles app` → Tempo.app.
-#   5. Wrap the .app in a compressed .dmg via hdiutil, then sign → notarize → staple.
+#   2. PyInstaller-freeze the whole app — server, Cocoa shell and web UI — into Tempo.app.
+#   3. Code-sign: Developer ID inside-out when an identity is set, ad-hoc otherwise.
+#   4. Tar the signed .app into the update archive installed copies download, and sign it.
+#   5. Wrap the .app in a compressed .dmg via hdiutil; with a Developer ID, sign → notarize →
+#      staple.
+#
+# Output, in packaging/dist/:
+#   Tempo_<ver>_arm64.dmg              what people download
+#   Tempo_<ver>_arm64.app.tar.gz       what the in-app updater downloads
+#   Tempo_<ver>_arm64.app.tar.gz.sig   its Ed25519 signature (only when a key is available)
 #
 # Prerequisites:
-#   - Rust (rustup) and the Tauri CLI: cargo install tauri-cli --version "^2"
 #   - A Python venv at .venv with the app's deps plus pyinstaller:
 #       python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pyinstaller
-#   - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in the environment or in .env
+#   - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in the environment or in .env. CI builds of pull
+#     requests have no secrets, so TEMPO_ALLOW_NO_OAUTH=1 builds without them (the app then
+#     launches with "Connect Google Calendar" disabled — fine for a test build, not a release).
 #
-# SIGNING: set APPLE_SIGNING_IDENTITY to a "Developer ID Application: … (TEAMID)" identity.
-# Left unset → UNSIGNED build: it runs locally, but anyone you send it to gets Gatekeeper's
-# "Apple could not verify…" dialog and has to allow it in System Settings → Privacy & Security.
+# No Rust/cargo/Tauri toolchain is needed any more: the shell is Python (desktop/shell.py) and
+# PyInstaller's BUNDLE emits the .app directly.
+#
+# SIGNING: APPLE_SIGNING_IDENTITY unset → AD-HOC signed (`codesign --sign -`). It runs, and the
+# bundle's resources are sealed, but Gatekeeper doesn't know the signer: the first launch on
+# each Mac needs right-click → Open (the README says how). Not leaving it unsigned matters: a
+# bundle with only the linker's ad-hoc signature on the executable has no resource seal and
+# macOS refuses out-of-process services to it, such as the open/save panel.
+# Set APPLE_SIGNING_IDENTITY to a "Developer ID Application: … (TEAMID)" identity to sign
+# properly instead.
 #
 # NOTARIZATION (runs only when the identity is set): signing alone is NOT enough for a public
 # download. Auth is an App Store Connect API key via NOTARYTOOL_API_KEY_PATH /
 # NOTARYTOOL_API_KEY_ID / NOTARYTOOL_API_ISSUER_ID. Missing → the DMG is still produced, with
 # a loud warning. Set TEMPO_SKIP_NOTARIZE=1 to sign but skip the slow notary round-trip.
+#
+# UPDATE SIGNING: the archive is signed by scripts/sign_update.py with $TEMPO_UPDATE_PRIVATE_KEY
+# (CI) or secrets/tempo_update_key (local). Neither → the archive is left unsigned, which
+# installed copies refuse; TEMPO_REQUIRE_UPDATE_SIGNATURE=1 (CI release builds) makes that an
+# error instead.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-DESKTOP="$ROOT/desktop"
+PY="$ROOT/.venv/bin/python"
 APP="Tempo"
-VERSION="$(node -p "require('$DESKTOP/tauri.conf.json').version")"
-TRIPLE="$(rustc -vV | sed -n 's/host: //p')"   # e.g. aarch64-apple-darwin
-ARCH="${TRIPLE%%-*}"
+DIST="$HERE/dist"
+BUNDLE="$DIST/$APP.app"
+VERSION="$("$PY" -c 'import sys; sys.path.insert(0, "'"$ROOT"'"); import desktop; print(desktop.__version__)')"
+ARCH="$(uname -m)"
 
-if [ "$ARCH" != "aarch64" ]; then
+if [ "$ARCH" != "arm64" ]; then
   echo "ERROR: Tempo targets Apple Silicon only (host is $ARCH)." >&2
   exit 1
 fi
 
 echo "==> [1/5] baking the Google OAuth client"
 # Env wins; otherwise read .env. Never committed — the file is gitignored.
-TEMPO_ROOT="$ROOT" "$ROOT/.venv/bin/python" - <<'PY'
+TEMPO_ROOT="$ROOT" "$PY" - <<'PY'
 import json, os, pathlib
 root = pathlib.Path(os.environ["TEMPO_ROOT"])
 cid = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
@@ -53,6 +73,10 @@ if not (cid and sec):
     except ImportError:
         pass
 if not (cid and sec):
+    if os.environ.get("TEMPO_ALLOW_NO_OAUTH") == "1":
+        print("    WARNING: no GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — building without an OAuth")
+        print("    client (TEMPO_ALLOW_NO_OAUTH=1). 'Connect Google Calendar' will be disabled.")
+        raise SystemExit(0)
     raise SystemExit("ERROR: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not found in env or .env")
 out = root / "packaging" / "oauth_client.json"
 out.write_text(json.dumps({"client_id": cid, "client_secret": sec}, indent=2))
@@ -60,70 +84,81 @@ out.chmod(0o600)
 print(f"    baked client {cid[:12]}…")
 PY
 
-echo "==> [2/5] PyInstaller: freezing tempo-server ($TRIPLE)"
+echo "==> [2/5] PyInstaller: freezing $APP.app ($ARCH)"
+rm -rf "$BUNDLE"
 "$ROOT/.venv/bin/pyinstaller" --noconfirm --clean \
-  --distpath "$HERE/dist" --workpath "$HERE/build" "$HERE/tempo-server.spec"
+  --distpath "$DIST" --workpath "$HERE/build" "$HERE/tempo.spec"
+test -d "$BUNDLE" || { echo "ERROR: $BUNDLE was not produced" >&2; exit 1; }
 
-echo "==> [3/5] staging sidecar resources"
-mkdir -p "$DESKTOP/binaries"
-rm -rf "$DESKTOP/binaries/sidecar"
-# -L (dereference): Tauri's resource bundler flattens symlinks into duplicate REAL files, so a
-# symlinked framework arrives as a standalone copy whose signature no longer validates. Copy
-# dereferenced up front, so what we SIGN is byte-identical to what Tauri COPIES.
-cp -RL "$HERE/dist/tempo-server" "$DESKTOP/binaries/sidecar"
-if [ -n "$(find "$DESKTOP/binaries/sidecar" -type l | head -1)" ]; then
-  echo "ERROR: symlinks survived staging — Tauri would flatten them into unsigned copies" >&2
-  exit 1
-fi
-# No *.framework may ship inside the sidecar: codesign/notarization infer bundle structure from
-# the path and can never validate a flattened framework layout.
-find "$DESKTOP/binaries/sidecar" -type d -name "*.framework" -exec rm -rf {} + 2>/dev/null || true
-if [ -n "$(find "$DESKTOP/binaries/sidecar" -type d -name "*.framework" | head -1)" ]; then
-  echo "ERROR: a .framework survived in the sidecar — it cannot pass notarization" >&2
-  exit 1
-fi
-chmod +x "$DESKTOP/binaries/sidecar/tempo-server"
-
-# Sign the sidecar's Mach-Os BEFORE tauri build: `tauri build` signs the .app (sealing resources
-# into its signature) but does NOT sign nested binaries inside resources, and unsigned Mach-Os
-# there fail notarization.
+echo "==> [3/5] staging + code-signing"
+STAGING="$(mktemp -d)"
+trap 'rm -rf "$STAGING"' EXIT
+STAGED="$STAGING/$APP.app"
+# ditto, not cp -R: it strips extended attributes. A checkout inside an iCloud-synced folder
+# (~/Documents) picks up com.apple.FinderInfo and com.apple.fileprovider on the bundle, and
+# codesign refuses those outright with "resource fork, Finder information, or similar detritus
+# not allowed" — including PyInstaller's own ad-hoc signing attempt during the build.
+ditto --norsrc --noextattr --noqtn "$BUNDLE" "$STAGED"
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-  echo "    signing sidecar binaries"
-  SIDECAR="$DESKTOP/binaries/sidecar"
-  find "$SIDECAR" -type f ! -name "tempo-server" \
-    ! -name "*.py" ! -name "*.pyc" ! -name "*.txt" ! -name "*.pem" ! -name "*.json" \
-    -print0 | while IFS= read -r -d '' f; do
+  # Inside-out: every nested Mach-O first, the bundle last. `codesign --deep` is explicitly
+  # discouraged by Apple and gets the entitlements wrong on nested code.
+  find "$STAGED/Contents" -type f -print0 | while IFS= read -r -d '' f; do
+    [ "$f" = "$STAGED/Contents/MacOS/$APP" ] && continue
     file -b "$f" | grep -q "Mach-O" || continue
     codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp --options runtime "$f"
   done
-  # Entitlements only on the entrypoint (disable-library-validation: the bundled Python dylibs
-  # carry a different Team ID).
+  # Entitlements on the bundle: disable-library-validation is required because the bundled
+  # Python dylibs carry a different Team ID. Accepted by notarization.
   codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp --options runtime \
-    --entitlements "$DESKTOP/entitlements.plist" "$SIDECAR/tempo-server"
+    --entitlements "$ROOT/desktop/entitlements.plist" "$STAGED"
+else
+  # Ad-hoc: no identity, no hardened runtime (and so no entitlements to carry). --deep is
+  # acceptable here precisely because there are no entitlements for it to get wrong; what it
+  # buys is a resource seal over the whole bundle, nested code included.
+  echo "    APPLE_SIGNING_IDENTITY unset — ad-hoc signing"
+  codesign --force --deep --sign - "$STAGED"
+fi
+# The signature is the checkpoint: a bundle that fails this launches and then breaks in ways
+# that only show up on someone else's Mac. Catch it here, not after installing.
+# (No --verbose: with --deep it prints a line for every nested file.)
+if ! codesign --verify --deep --strict "$STAGED"; then
+  echo "ERROR: the app bundle signature is not valid" >&2
+  exit 1
+fi
+echo "    signature valid"
+
+echo "==> [4/5] update archive"
+# Built from the signed, staged bundle — the same bytes that go in the .dmg — before the
+# /Applications symlink joins it in the staging dir. COPYFILE_DISABLE keeps macOS tar from
+# adding ._ AppleDouble files, which would land inside the installed bundle and break its seal.
+UPDATE="$DIST/${APP}_${VERSION}_${ARCH}.app.tar.gz"
+rm -f "$UPDATE" "$UPDATE.sig"
+COPYFILE_DISABLE=1 /usr/bin/tar -C "$STAGING" -czf "$UPDATE" "$APP.app"
+if [ -n "${TEMPO_UPDATE_PRIVATE_KEY:-}" ] || [ -f "$ROOT/secrets/tempo_update_key" ]; then
+  "$PY" "$ROOT/scripts/sign_update.py" "$UPDATE"
+elif [ "${TEMPO_REQUIRE_UPDATE_SIGNATURE:-}" = "1" ]; then
+  echo "ERROR: TEMPO_REQUIRE_UPDATE_SIGNATURE=1 but no update signing key (set" >&2
+  echo "       TEMPO_UPDATE_PRIVATE_KEY or create secrets/tempo_update_key)" >&2
+  exit 1
+else
+  echo "    WARNING: no update signing key — $(basename "$UPDATE") is unsigned, and installed"
+  echo "    copies will refuse it. Fine for a test build; releases must be signed."
 fi
 
-echo "==> [4/5] tauri build (.app)"
-( cd "$DESKTOP" && cargo tauri build --bundles app )
-
 echo "==> [5/5] hdiutil: wrapping into .dmg"
-BUNDLE="$DESKTOP/target/release/bundle"
-STAGING="$(mktemp -d)"
-cp -R "$BUNDLE/macos/$APP.app" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
-DMG="$BUNDLE/dmg/${APP}_${VERSION}_${ARCH}.dmg"
-mkdir -p "$(dirname "$DMG")"
+DMG="$DIST/${APP}_${VERSION}_${ARCH}.dmg"
 rm -f "$DMG"
 # Clear any stale mount so our image doesn't mount as "$APP 1".
 [ -d "/Volumes/$APP" ] && hdiutil detach "/Volumes/$APP" -force >/dev/null 2>&1 || true
 hdiutil create -volname "$APP" -srcfolder "$STAGING" -ov -format UDZO \
   -imagekey zlib-level=9 "$DMG" >/dev/null
-rm -rf "$STAGING"
 
 if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
   echo ""
-  echo "    UNSIGNED build — fine for local use and hand-held testers, but every recipient"
-  echo "    will see Gatekeeper's \"Apple could not verify\" dialog and must allow it under"
-  echo "    System Settings → Privacy & Security. Set APPLE_SIGNING_IDENTITY to fix."
+  echo "    AD-HOC signed build — it runs, but Gatekeeper doesn't know the signer, so the first"
+  echo "    launch on each Mac needs right-click → Open (or System Settings → Privacy & Security"
+  echo "    → Open Anyway). Set APPLE_SIGNING_IDENTITY to sign with a Developer ID instead."
 elif [ "${TEMPO_SKIP_NOTARIZE:-}" = "1" ]; then
   echo "    TEMPO_SKIP_NOTARIZE=1 — signing container, SKIPPING notarize (do not distribute)"
   codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
@@ -150,3 +185,6 @@ fi
 
 echo ""
 echo "Done → $DMG"
+echo "       $UPDATE"
+[ -f "$UPDATE.sig" ] && echo "       $UPDATE.sig"
+exit 0
