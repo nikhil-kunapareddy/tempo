@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -22,7 +22,7 @@ from .paths import is_frozen, resource_dir
 if not is_frozen():
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from . import agent, config, google_oauth, together, updater  # noqa: E402  (import after dotenv load)
+from . import agent, config, google_oauth, outreach, together, updater  # noqa: E402  (import after dotenv load)
 
 # transient CSRF state for the OAuth round-trip (single local user)
 _oauth_state: dict[str, bool] = {}
@@ -50,7 +50,7 @@ _CONNECTED_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tem
  .m{color:#9aa2b1;font-size:14px} .ok{color:#3fb950;font-size:32px;margin-bottom:12px}
 </style></head><body><div class="c">
  <div class="ok">&#10003;</div>
- <div class="t">Google Calendar connected</div>
+ <div class="t">Google connected</div>
  <div class="m">You can close this tab and return to Tempo.</div>
 </div></body></html>"""
 
@@ -71,6 +71,30 @@ class SettingsIn(BaseModel):
     google_access_token: str | None = None
     model: str | None = None
     auto_update: bool | None = None
+
+
+class OutreachRowIn(BaseModel):
+    id: str | None = None
+    org: str = ""
+    role: str = ""
+    recruiter_name: str = ""
+    recruiter_email: str = ""
+
+
+class OutreachIn(BaseModel):
+    rows: list[OutreachRowIn] = []
+    template: str = ""
+    attach_resume: bool = True
+
+
+class ResumeIn(BaseModel):
+    filename: str
+    data_base64: str
+
+
+class DraftIn(BaseModel):
+    subject: str = ""
+    body: str = ""
 
 
 @app.get("/api/health")
@@ -171,6 +195,60 @@ def update_install():
     except updater.UpdateError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     return {"ok": True}
+
+
+# -- Outreach: recruiter table + resume + sample email → Gmail drafts (see outreach.py) -------
+def _outreach(call):
+    try:
+        return call()
+    except outreach.OutreachError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+
+
+@app.get("/api/outreach")
+def outreach_state() -> dict[str, Any]:
+    return outreach.public_state()
+
+
+@app.put("/api/outreach")
+def outreach_update(body: OutreachIn) -> dict[str, Any]:
+    return _outreach(lambda: outreach.update(body.model_dump()))
+
+
+@app.get("/api/outreach/status")
+def outreach_status() -> dict[str, Any]:
+    """Whether Claude Code is installed and Gmail drafts are allowed, for the Outreach header."""
+    return outreach.status()
+
+
+@app.post("/api/outreach/resume")
+def outreach_resume(body: ResumeIn) -> dict[str, Any]:
+    return _outreach(lambda: outreach.upload_resume(body.filename, body.data_base64))
+
+
+@app.delete("/api/outreach/resume")
+def outreach_resume_delete() -> dict[str, Any]:
+    return _outreach(outreach.delete_resume)
+
+
+@app.post("/api/outreach/generate/{row_id}")
+async def outreach_generate(row_id: str) -> dict[str, Any]:
+    """Claude Code writes this row's email (10-30s). Async, so the UI can run a few at once."""
+    try:
+        return await outreach.generate_draft(row_id)
+    except outreach.OutreachError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+
+
+@app.put("/api/outreach/drafts/{row_id}")
+def outreach_edit_draft(row_id: str, body: DraftIn) -> dict[str, Any]:
+    return _outreach(lambda: outreach.edit_draft(row_id, body.subject, body.body))
+
+
+@app.post("/api/outreach/drafts/{row_id}/save")
+def outreach_save_draft(row_id: str) -> dict[str, Any]:
+    """Create or update this row's Gmail draft. Tempo never sends mail."""
+    return _outreach(lambda: outreach.save_draft(row_id))
 
 
 @app.get("/")

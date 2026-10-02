@@ -14,6 +14,8 @@ Two things here are load-bearing rather than incidental:
     accounts.google.com — no link is ever clicked.
   - **The Edit menu.** A Cocoa app with no menu bar gets no Cmd+C/V/X/A/Z in its webview,
     because those are menu-driven actions, not key handling the webview does itself.
+  - **The file picker.** WKWebView shows no panel for `<input type="file">` on its own; the
+    UI delegate has to run an NSOpenPanel and hand the chosen URLs back.
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSMenu,
     NSMenuItem,
+    NSModalResponseOK,
+    NSOpenPanel,
     NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskMiniaturizable,
@@ -97,6 +101,32 @@ def open_externally(url: str) -> None:
 # already carries that metadata for this selector, yet still hands over a signature-less block.
 _DECIDE_POLICY_SIGNATURE = b"v@:@@@?<v@?q>"
 
+# Same problem, same fix, for the file-input callback: its fourth argument is
+# void (^)(NSArray<NSURL *> *), so `@?<v@?@>` — a block taking one object.
+_OPEN_PANEL_SIGNATURE = b"v@:@@@@?<v@?@>"
+
+
+def present_open_panel(window, parameters, on_done: Callable) -> None:
+    """Run an NSOpenPanel for an `<input type="file">` and pass the chosen URLs to `on_done`.
+
+    `on_done` receives an NSArray of NSURLs, or None when the user cancels — WebKit requires the
+    completion handler to be called exactly once either way. Shown as a sheet on the app window
+    when there is one. The input's `accept` filter isn't exposed by WKOpenPanelParameters, so
+    the panel allows any file and the server rejects types it can't read.
+    """
+    panel = NSOpenPanel.openPanel()
+    panel.setCanChooseFiles_(True)
+    panel.setCanChooseDirectories_(bool(parameters.allowsDirectories()))
+    panel.setAllowsMultipleSelection_(bool(parameters.allowsMultipleSelection()))
+
+    def finished(response) -> None:
+        on_done(panel.URLs() if response == NSModalResponseOK else None)
+
+    if window is not None:
+        panel.beginSheetModalForWindow_completionHandler_(window, finished)
+    else:
+        finished(panel.runModal())
+
 
 def _protocols() -> list:
     """Formal conformance for NSApplicationDelegate only.
@@ -113,7 +143,7 @@ def _protocols() -> list:
 
 
 class TempoWebDelegate(NSObject, protocols=_protocols()):
-    """Navigation policy, popup handling, and app teardown, in one object.
+    """Navigation policy, popups, the file picker, and app teardown, in one object.
 
     Objective-C classes share one process-wide namespace, hence the prefixed name.
     """
@@ -155,6 +185,13 @@ class TempoWebDelegate(NSObject, protocols=_protocols()):
         if url:
             open_externally(url)
         return None
+
+    @objc.typedSelector(_OPEN_PANEL_SIGNATURE)
+    def webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler_(
+        self, webview, parameters, frame, completion_handler
+    ):
+        """`<input type="file">`: without this, clicking "Choose file…" does nothing at all."""
+        present_open_panel(webview.window(), parameters, completion_handler)
 
     # -- NSApplicationDelegate --------------------------------------------------------------
 

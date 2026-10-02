@@ -73,6 +73,11 @@ hiddenimports += [
 # packages are resolved lazily by pyobjc itself, so none of these are found by static analysis.
 hiddenimports += ["objc", "Foundation", "AppKit", "WebKit", "PyObjCTools.AppHelper"]
 
+# Outreach. claude_code.py imports the Claude Agent SDK inside generate(), and outreach.py reads
+# PDF resumes with PDFKit (Quartz) inside _pdf_text(), so neither is seen by static analysis.
+hiddenimports += collect_submodules("claude_agent_sdk")
+hiddenimports += ["Quartz"]
+
 # Read from disk at runtime rather than embedded in the Python.
 datas += [
     (os.path.join(ROOT, "web"), "web"),
@@ -100,6 +105,17 @@ a = Analysis(
     excludes=["tkinter", "matplotlib", "PIL", "PyQt5", "PySide6", "backend.tests"],
     noarchive=False,
 )
+# The SDK wheel carries its own Claude Code CLI (claude_agent_sdk/_bundled/claude, ~225 MB).
+# Tempo always runs the user's installed Claude Code (claude_code.find_cli() → cli_path), so a
+# bundled copy would be dead weight: it would make the .dmg and every update download several
+# times larger. Dropped here in case any hook collects it.
+def _not_bundled_cli(entry):
+    return "claude_agent_sdk/_bundled" not in entry[0].replace(os.sep, "/")
+
+
+a.datas = [e for e in a.datas if _not_bundled_cli(e)]
+a.binaries = [e for e in a.binaries if _not_bundled_cli(e)]
+
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,

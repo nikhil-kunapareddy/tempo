@@ -8,8 +8,11 @@
 > | Axis | In scope | Out of scope |
 > |------|----------|--------------|
 > | **Platform** | macOS on **Apple Silicon** only | Windows, Intel macs, Linux |
-> | **Model keys** | **Together AI** (`TOGETHER_API_KEY`) | OpenAI/Anthropic/Gemini/Ollama/Fireworks keys |
-> | **Connectors** | **Google Calendar** only | Slack, Gmail, GitHub, Jira, Notion, HubSpot, and all other integrations |
+> | **Model keys** | **Together AI** (`TOGETHER_API_KEY`) for chat; the user's **installed Claude Code** (via the Claude Agent SDK, no bundled CLI, no API key) for Outreach drafting only | OpenAI/Anthropic/Gemini/Ollama/Fireworks keys as selectable chat providers |
+> | **Connectors** | **Google Calendar**; **Gmail drafts** for Outreach (`gmail.compose` only: create/update drafts, never send or read mail) | Slack, GitHub, Jira, Notion, HubSpot, other Gmail access, and all other integrations |
+>
+> The Tempo app now lives at the repo root (`backend/`, `desktop/`, `web/`, `packaging/`);
+> the `coworker/` paths below describe the legacy OpenWorker code kept in `open-worker/`.
 
 ## Important architecture facts (read before editing)
 
@@ -98,8 +101,11 @@
 ## Guardrails for future work
 
 1. **Do not re-add** OpenAI/Anthropic/Gemini/Ollama/Fireworks as selectable providers.
-   New models are added only as `together:*` entries in `matrix.py`.
-2. **Do not re-add** any connector other than Google Calendar.
+   New models are added only as `together:*` entries in `matrix.py`. The one exception is
+   Outreach drafting, which runs on the user's installed Claude Code
+   (`backend/app/claude_code.py`) — don't bundle the CLI or add an Anthropic API key path.
+2. **Do not re-add** any connector other than Google Calendar and Gmail drafts. Gmail stays
+   at the `gmail.compose` scope: create/update drafts only, never send or read mail.
 3. **Do not add** Windows/Linux/Intel packaging paths.
 4. When editing shared connector files, preserve Google Calendar behavior; strip, never
    extend, other integrations.
