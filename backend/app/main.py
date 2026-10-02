@@ -87,6 +87,10 @@ class OutreachIn(BaseModel):
     attach_resume: bool = True
 
 
+class CsvIn(BaseModel):
+    csv: str = ""
+
+
 class ResumeIn(BaseModel):
     filename: str
     data_base64: str
@@ -218,6 +222,12 @@ def outreach_state() -> dict[str, Any]:
 @app.put("/api/outreach")
 def outreach_update(body: OutreachIn) -> dict[str, Any]:
     return _outreach(lambda: outreach.update(body.model_dump()))
+
+
+@app.post("/api/outreach/import")
+def outreach_import(body: CsvIn) -> dict[str, Any]:
+    """Replace the recipients table with rows pasted as CSV."""
+    return _outreach(lambda: outreach.import_csv(body.csv))
 
 
 @app.get("/api/outreach/status")

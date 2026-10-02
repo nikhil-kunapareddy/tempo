@@ -14,7 +14,9 @@ never await, which is what makes a threading lock safe to take from the async en
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -199,6 +201,77 @@ def update(body: dict[str, Any]) -> dict[str, Any]:
         state["drafts"] = {rid: d for rid, d in state["drafts"].items() if rid in seen}
         _write(state)
         return _public(state)
+
+
+# -- CSV import ---------------------------------------------------------------------------
+# Header names people actually use, squashed to lowercase letters and digits.
+_CSV_HEADERS = {
+    "org": {"org", "orgname", "organization", "organisation", "company", "companyname", "employer"},
+    "role": {"role", "title", "jobtitle", "position", "job", "roletitle"},
+    "recruiter_name": {"recruiter", "recruitername", "name", "contact", "contactname", "fullname"},
+    "recruiter_email": {"email", "recruiteremail", "emailaddress", "mail", "contactemail", "emailid"},
+}
+
+
+def _header_field(cell: str) -> str | None:
+    key = re.sub(r"[^a-z0-9]", "", cell.lower())
+    return next((field for field, names in _CSV_HEADERS.items() if key in names), None)
+
+
+def parse_csv(text: str) -> list[dict[str, str]]:
+    """Rows from pasted CSV (or tab-separated cells copied out of a spreadsheet).
+
+    With a header row, columns are matched by name in any order and unknown ones are ignored.
+    Without one, the columns are org, role, recruiter name, recruiter email, in that order.
+    """
+    lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()]
+    if not lines:
+        raise OutreachError(400, "Paste at least one row: org, role, recruiter name, recruiter email.")
+    first = lines[0]
+    delimiter = "\t" if "\t" in first else (";" if first.count(";") > first.count(",") else ",")
+    records = [[cell.strip() for cell in rec] for rec in csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)]
+    records = [rec for rec in records if any(rec)]
+
+    header = [_header_field(cell) for cell in records[0]]
+    has_header = sum(1 for field in header if field) >= 2
+    if has_header:
+        columns = {field: i for i, field in reversed(list(enumerate(header))) if field}
+        records = records[1:]
+    else:
+        columns = {field: i for i, field in enumerate(ROW_FIELDS)}
+
+    rows: list[dict[str, str]] = []
+    for number, rec in enumerate(records, start=2 if has_header else 1):
+        if not has_header and len(rec) > len(ROW_FIELDS):
+            raise OutreachError(
+                400,
+                f"Line {number} has {len(rec)} columns; expected org, role, recruiter name, "
+                "recruiter email. Add a header row to pick columns from a wider sheet.",
+            )
+        rows.append({field: rec[i] if i < len(rec) else "" for field, i in columns.items()})
+    if not rows:
+        raise OutreachError(400, "There's a header row but no rows under it.")
+    return [{field: row.get(field, "") for field in ROW_FIELDS} for row in rows]
+
+
+def import_csv(text: str) -> dict[str, Any]:
+    """Replace the table with pasted CSV rows (POST /api/outreach/import).
+
+    A pasted row that matches an existing one (same org, role and recruiter name) keeps that
+    row's id, so its draft survives re-applying the same list with a fixed email or new rows.
+    """
+    rows = parse_csv(text)
+    if len(rows) > MAX_ROWS:
+        raise OutreachError(400, f"That's more than {MAX_ROWS} rows. Split the list into smaller batches.")
+    with _lock:
+        state = _load()
+    key = lambda r: tuple(str(r.get(f, "")).strip().lower() for f in ("org", "role", "recruiter_name"))
+    existing = {key(r): r["id"] for r in state["rows"]}
+    for row in rows:
+        rid = existing.pop(key(row), None)
+        if rid:
+            row["id"] = rid
+    return update({"rows": rows, "template": state.get("template", ""), "attach_resume": None})
 
 
 # -- the resume ---------------------------------------------------------------------------

@@ -595,3 +595,64 @@ def test_granted_scopes_are_recorded_and_forgotten():
     google_oauth.disconnect()
     assert google_oauth.can_draft() is False
     assert "google_scopes" not in json.loads(config.SETTINGS_FILE.read_text())
+
+
+# -- CSV import ----------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # no header: the four columns in order; quoted commas; a missing trailing email
+        ('Acme,Data Engineer,Ana,ana@acme.com\nGlobex,"Backend, Platform",Raj,',
+         [("Acme", "Data Engineer", "Ana", "ana@acme.com"), ("Globex", "Backend, Platform", "Raj", "")]),
+        # cells copied out of a spreadsheet arrive tab-separated, with CRLF and blank lines
+        ("Acme\tData Engineer\tAna\tana@acme.com\r\n\r\nGlobex\tSRE\tRaj\traj@globex.com\r\n",
+         [("Acme", "Data Engineer", "Ana", "ana@acme.com"), ("Globex", "SRE", "Raj", "raj@globex.com")]),
+        # a header picks columns by name, in any order, and ignores the ones it doesn't know
+        ("Email,Company,Notes,Recruiter Name,Job Title\nana@acme.com,Acme,met at fair,Ana,DE",
+         [("Acme", "DE", "Ana", "ana@acme.com")]),
+        # European-style semicolons
+        ("org;role;recruiter;email\nAcme;DE;Ana;ana@acme.com", [("Acme", "DE", "Ana", "ana@acme.com")]),
+    ],
+)
+def test_parse_csv(text, expected):
+    rows = outreach.parse_csv(text)
+    assert [(r["org"], r["role"], r["recruiter_name"], r["recruiter_email"]) for r in rows] == expected
+
+
+@pytest.mark.parametrize(
+    "text, fragment",
+    [
+        ("", "Paste at least one row"),
+        ("  \n\n", "Paste at least one row"),
+        ("org,role,recruiter,email\n", "no rows under it"),
+        ("Acme,DE,Ana,ana@acme.com,extra,more", "Line 1 has 6 columns"),
+    ],
+)
+def test_parse_csv_rejects(text, fragment):
+    with pytest.raises(outreach.OutreachError) as err:
+        outreach.parse_csv(text)
+    assert err.value.status == 400 and fragment in err.value.detail
+
+
+def test_import_replaces_rows_and_keeps_matching_drafts(client, fake_claude):
+    state = _setup(client, rows=[_row(org="Acme", recruiter_name="Ana"), _row(org="Initech", recruiter_name="Bo")])
+    acme_id = state["rows"][0]["id"]
+    assert client.post(f"/api/outreach/generate/{acme_id}").status_code == 200
+
+    r = client.post("/api/outreach/import", json={
+        "csv": "org,role,recruiter name,email\nacme,data engineer,ana,new@acme.com\nGlobex,SRE,Raj,"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [row["org"] for row in body["rows"]] == ["acme", "Globex"]  # Initech is gone
+    assert body["rows"][0]["id"] == acme_id  # same org/role/recruiter → same row
+    assert body["rows"][0]["recruiter_email"] == "new@acme.com"
+    assert list(body["drafts"]) == [acme_id]
+    assert body["template"] == TEMPLATE  # the sample email is untouched
+
+
+def test_import_reports_bad_rows(client):
+    _setup(client)
+    r = client.post("/api/outreach/import", json={"csv": "Acme,DE,Ana,not-an-email"})
+    assert r.status_code == 400 and "doesn't look like an email" in r.json()["detail"]
+    r = client.post("/api/outreach/import", json={"csv": ""})
+    assert r.status_code == 400

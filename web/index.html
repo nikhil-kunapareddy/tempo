@@ -95,6 +95,7 @@
                   border-radius:8px; padding:8px 10px; margin:8px 0 0; }
     details > summary { cursor:pointer; }
     .grid-wrap { overflow-x:auto; }
+    textarea.csv { font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre; overflow-x:auto; }
     table.grid { border-collapse:collapse; width:100%; min-width:720px; }
     .grid th { font-size:12px; color:var(--muted); font-weight:500; text-align:left; padding:0 4px 6px; }
     .grid td { padding:3px 4px; vertical-align:middle; }
@@ -217,6 +218,14 @@
 
             <section class="section">
               <h3>Recipients</h3>
+              <label class="hint" for="or-csv">Paste rows from a CSV or a spreadsheet, then Apply. A header row is optional; with one, columns can be in any order.</label>
+              <textarea id="or-csv" class="csv" rows="5" spellcheck="false" autocomplete="off"
+                placeholder="org,role,recruiter name,recruiter email&#10;Acme Robotics,Data Engineer,Ana Lopez,ana@acme.com&#10;Globex,Backend Engineer,Raj Patel,raj@globex.com"></textarea>
+              <div class="row-line">
+                <button class="secondary small" id="or-csv-apply">Apply</button>
+                <span class="hint" id="or-csv-note">Replaces the table below. Rows that match an existing one keep their draft.</span>
+              </div>
+              <div class="inline-err" id="or-csv-err" hidden></div>
               <div class="grid-wrap">
                 <table class="grid">
                   <thead><tr><th>Org name</th><th>Role</th><th>Recruiter name</th><th>Recruiter email</th><th>Status</th><th></th></tr></thead>
@@ -847,6 +856,30 @@
         addRow();
       });
 
+      // Pasted CSV replaces the table. Parsing is the server's (POST /api/outreach/import), so a
+      // quoted comma or a spreadsheet's tabs mean the same thing here as in the tests.
+      $("or-csv-apply").addEventListener("click", async (e) => {
+        e.preventDefault();
+        const btn = $("or-csv-apply");
+        btn.disabled = true;
+        showErr($("or-csv-err"), "");
+        try {
+          await save();  // the import keeps the sample email it finds on the server
+          const state = await api("POST", "/api/outreach/import", { csv: $("or-csv").value });
+          const n = (state.rows || []).length;
+          rows = (state.rows || []).map(newRow);
+          if (!rows.length) rows.push(newRow());
+          Object.keys(rowErrors).forEach((k) => delete rowErrors[k]);
+          renderGrid();
+          mergeDrafts(state.drafts || {}, ++seq);
+          $("or-csv-note").textContent = `Applied ${n} row${n === 1 ? "" : "s"}.`;
+        } catch (err) {
+          showErr($("or-csv-err"), err.message);
+        } finally {
+          syncButtons();
+        }
+      });
+
       function rowStatus(row) {
         if (generating.has(row.key)) return { text: "Generating…", cls: "" };
         if (rowErrors[row.key]) return { text: "Error", cls: "bad", detail: rowErrors[row.key] };
@@ -1195,6 +1228,7 @@
         const claudeOff = !!(status && status.claude && status.claude.available === false);
         const gen = $("or-generate");
         gen.disabled = running || claudeOff;
+        $("or-csv-apply").disabled = running;
         gen.title = claudeOff ? (status.claude.message || "Claude Code isn't available.") : "";
         $("or-stop").hidden = !running;
         $("or-stop").disabled = stopRequested;
