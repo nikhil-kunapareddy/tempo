@@ -18,3 +18,7 @@ claude-agent-sdk>=0.2
 
 # Outreach resume reading (backend/app/outreach.py): PDF text via macOS's PDFKit.
 pyobjc-framework-Quartz>=10.1
+
+# Outreach recipients import (backend/app/outreach.py): .xlsx via openpyxl, legacy .xls via xlrd.
+openpyxl>=3.1
+xlrd>=2.0

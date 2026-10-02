@@ -38,12 +38,15 @@ from . import claude_code, config, google_oauth
 
 MAX_ROWS = 200
 MAX_FIELD = 300  # characters per table cell
+MAX_ABOUT = 1_000  # the About column holds a sentence or two about the org
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_TEMPLATE = 20_000
 MAX_RESUME_BYTES = 10 * 1024 * 1024
 MAX_RESUME_CHARS = 40_000  # what goes into the prompt; a long resume is ~15k
 PREVIEW_CHARS = 300
 
-ROW_FIELDS = ("org", "role", "recruiter_name", "recruiter_email")
+ROW_FIELDS = ("org", "role", "recruiter_name", "recruiter_email", "about", "website")
+IMPORT_TYPES = (".xlsx", ".xls", ".csv", ".tsv", ".txt")
 RESUME_TYPES = (".pdf", ".docx", ".doc", ".rtf", ".txt", ".md")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ROW_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -120,10 +123,15 @@ def _now() -> str:
 
 # -- what the UI sees ---------------------------------------------------------------------
 def _input_hash(row: dict[str, Any], template: str, resume: dict[str, Any] | None) -> str:
-    """What a draft was written from. The recruiter's email isn't in it: it only fills the
+    """What a draft was written from. The contact's email isn't in it: it only fills the
     To: line at save time, so changing it doesn't make the text out of date."""
     basis = [row.get("org", ""), row.get("role", ""), row.get("recruiter_name", ""), template,
              (resume or {}).get("sha256", "")]
+    # Added later; left out when empty so drafts written before these columns existed
+    # don't all turn stale at once.
+    extra = [row.get("about", ""), row.get("website", "")]
+    if any(extra):
+        basis += extra
     return hashlib.sha256(json.dumps(basis).encode("utf-8")).hexdigest()
 
 
@@ -178,7 +186,7 @@ def update(body: dict[str, Any]) -> dict[str, Any]:
     seen: set[str] = set()
     for number, raw in enumerate(rows_in, start=1):
         raw = raw if isinstance(raw, dict) else {}
-        row = {f: _clean(raw.get(f), MAX_FIELD) for f in ROW_FIELDS}
+        row = {f: _clean(raw.get(f), MAX_ABOUT if f == "about" else MAX_FIELD) for f in ROW_FIELDS}
         email = row["recruiter_email"]
         if email and not _EMAIL.match(email):
             raise OutreachError(400, f"Row {number}: “{email}” doesn't look like an email address.")
@@ -203,64 +211,159 @@ def update(body: dict[str, Any]) -> dict[str, Any]:
         return _public(state)
 
 
-# -- CSV import ---------------------------------------------------------------------------
+# -- importing rows ------------------------------------------------------------------------
 # Header names people actually use, squashed to lowercase letters and digits.
-_CSV_HEADERS = {
-    "org": {"org", "orgname", "organization", "organisation", "company", "companyname", "employer"},
-    "role": {"role", "title", "jobtitle", "position", "job", "roletitle"},
-    "recruiter_name": {"recruiter", "recruitername", "name", "contact", "contactname", "fullname"},
+_HEADERS = {
+    "org": {"org", "orgname", "organization", "organisation", "company", "companyname", "employer",
+            "startup", "firm"},
+    "role": {"role", "title", "jobtitle", "position", "job", "roletitle", "opening"},
+    "recruiter_name": {"recruiter", "recruitername", "name", "contact", "contactname", "fullname",
+                       "person", "founder", "ceo", "hiringmanager", "poc", "contactperson"},
     "recruiter_email": {"email", "recruiteremail", "emailaddress", "mail", "contactemail", "emailid"},
+    "about": {"about", "description", "desc", "notes", "focus", "summary", "what", "whattheydo",
+              "companydescription", "area"},
+    "website": {"website", "url", "site", "link", "web", "homepage", "domain"},
 }
+_URL = re.compile(r"^(https?://\S+|www\.\S+|[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(/\S*)?)$", re.IGNORECASE)
+# "Superluminal Medicines Inc. - AI-driven GPCR drug design (Boston)": an org with its blurb.
+_ORG_BLURB = re.compile(r"^(.*?\S)\s+[-–—]\s+(\S.*)$")
 
 
 def _header_field(cell: str) -> str | None:
     key = re.sub(r"[^a-z0-9]", "", cell.lower())
-    return next((field for field, names in _CSV_HEADERS.items() if key in names), None)
+    return next((field for field, names in _HEADERS.items() if key in names), None)
+
+
+def _is_header(record: list[str]) -> bool:
+    cells = [c for c in record if c]
+    if any(_EMAIL.match(c) or _URL.match(c) for c in cells):
+        return False
+    return sum(1 for c in cells if _header_field(c)) >= 2
+
+
+def _split_org(row: dict[str, str]) -> dict[str, str]:
+    if not row.get("about"):
+        m = _ORG_BLURB.match(row.get("org", ""))
+        if m:
+            row["org"], row["about"] = m.group(1), m.group(2)
+    return row
+
+
+def _guess_row(record: list[str]) -> dict[str, str]:
+    """A row with no header to go by: emails and URLs are recognised by their shape, and the
+    remaining text is org, then (role,) contact name, then anything else as About."""
+    row = dict.fromkeys(ROW_FIELDS, "")
+    texts = []
+    for cell in record:
+        if not cell:
+            continue
+        if not row["recruiter_email"] and _EMAIL.match(cell):
+            row["recruiter_email"] = cell
+        elif "@" in cell and " " not in cell:  # meant as an email, but isn't one
+            raise OutreachError(400, f"“{cell}” doesn't look like an email address.")
+        elif not row["website"] and _URL.match(cell):
+            row["website"] = cell
+        else:
+            texts.append(cell)
+    if texts:
+        row["org"] = texts[0]
+    if len(texts) == 2:
+        row["recruiter_name"] = texts[1]
+    elif len(texts) >= 3:
+        row["role"], row["recruiter_name"] = texts[1], texts[2]
+        row["about"] = " · ".join(texts[3:])
+    return row
+
+
+def rows_from_records(records: list[list[str]]) -> list[dict[str, str]]:
+    """Rows from a grid of cells (pasted text or a spreadsheet's first sheet).
+
+    With a header row, columns are matched by name in any order and unknown ones are ignored.
+    Without one, each cell's content decides where it goes (see _guess_row), so cells copied
+    straight out of a sheet work whatever its column order.
+    """
+    records = [[str(c).strip() for c in rec] for rec in records]
+    records = [rec for rec in records if any(rec)]
+    if not records:
+        raise OutreachError(400, "Paste at least one row: org, role, contact name, contact email.")
+
+    has_header = _is_header(records[0])
+    if has_header:
+        header = [_header_field(c) for c in records[0]]
+        columns = {field: i for i, field in reversed(list(enumerate(header))) if field}
+        records = records[1:]
+        if not records:
+            raise OutreachError(400, "There's a header row but no rows under it.")
+
+    rows = []
+    for number, rec in enumerate(records, start=2 if has_header else 1):
+        if has_header:
+            row = {f: rec[columns[f]] if f in columns and columns[f] < len(rec) else "" for f in ROW_FIELDS}
+        else:
+            row = _guess_row(rec)
+        row = _split_org(row)
+        if not row["org"]:
+            raise OutreachError(400, f"Line {number} has no org name.")
+        rows.append(row)
+    return rows
+
+
+def _split_text(text: str) -> list[list[str]]:
+    """Cells from pasted text: tabs (what Excel and Sheets copy), runs of spaces (tabs that got
+    turned into spaces on the way), or CSV with commas or semicolons."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line for line in text.split("\n") if line.strip()]
+    if not lines:
+        return []
+    if any("\t" in line for line in lines):
+        return list(csv.reader(io.StringIO("\n".join(lines)), delimiter="\t"))
+    spaced = sum(1 for line in lines if re.search(r"\S {2,}\S", line))
+    if spaced * 2 >= len(lines):
+        return [re.split(r" {2,}", line.strip()) for line in lines]
+    first = lines[0]
+    delimiter = ";" if first.count(";") > first.count(",") else ","
+    return list(csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter))
 
 
 def parse_csv(text: str) -> list[dict[str, str]]:
-    """Rows from pasted CSV (or tab-separated cells copied out of a spreadsheet).
-
-    With a header row, columns are matched by name in any order and unknown ones are ignored.
-    Without one, the columns are org, role, recruiter name, recruiter email, in that order.
-    """
-    lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()]
-    if not lines:
-        raise OutreachError(400, "Paste at least one row: org, role, recruiter name, recruiter email.")
-    first = lines[0]
-    delimiter = "\t" if "\t" in first else (";" if first.count(";") > first.count(",") else ",")
-    records = [[cell.strip() for cell in rec] for rec in csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)]
-    records = [rec for rec in records if any(rec)]
-
-    header = [_header_field(cell) for cell in records[0]]
-    has_header = sum(1 for field in header if field) >= 2
-    if has_header:
-        columns = {field: i for i, field in reversed(list(enumerate(header))) if field}
-        records = records[1:]
-    else:
-        columns = {field: i for i, field in enumerate(ROW_FIELDS)}
-
-    rows: list[dict[str, str]] = []
-    for number, rec in enumerate(records, start=2 if has_header else 1):
-        if not has_header and len(rec) > len(ROW_FIELDS):
-            raise OutreachError(
-                400,
-                f"Line {number} has {len(rec)} columns; expected org, role, recruiter name, "
-                "recruiter email. Add a header row to pick columns from a wider sheet.",
-            )
-        rows.append({field: rec[i] if i < len(rec) else "" for field, i in columns.items()})
-    if not rows:
-        raise OutreachError(400, "There's a header row but no rows under it.")
-    return [{field: row.get(field, "") for field in ROW_FIELDS} for row in rows]
+    return rows_from_records(_split_text(text))
 
 
-def import_csv(text: str) -> dict[str, Any]:
-    """Replace the table with pasted CSV rows (POST /api/outreach/import).
+def _cell_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    return str(value).strip()
 
-    A pasted row that matches an existing one (same org, role and recruiter name) keeps that
-    row's id, so its draft survives re-applying the same list with a fixed email or new rows.
-    """
-    rows = parse_csv(text)
+
+def _sheet_records(data: bytes, suffix: str) -> list[list[str]]:
+    """The first sheet's cells, from an .xlsx (openpyxl) or a legacy .xls (xlrd)."""
+    try:
+        if suffix == ".xlsx":
+            import openpyxl
+
+            book = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+            try:
+                sheet = book.worksheets[0]
+                return [[_cell_text(v) for v in row] for row in sheet.iter_rows(values_only=True)]
+            finally:
+                book.close()
+        import xlrd
+
+        sheet = xlrd.open_workbook(file_contents=data).sheet_by_index(0)
+        return [[_cell_text(v) for v in sheet.row_values(r)] for r in range(sheet.nrows)]
+    except OutreachError:
+        raise
+    except Exception:
+        raise OutreachError(400, "Couldn't read that spreadsheet. Save it as .xlsx or .csv and try again.") from None
+
+
+def _replace_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
+    """Replace the table. A row that matches an existing one (same org, role and contact)
+    keeps that row's id, so its draft survives re-importing the same list."""
     if len(rows) > MAX_ROWS:
         raise OutreachError(400, f"That's more than {MAX_ROWS} rows. Split the list into smaller batches.")
     with _lock:
@@ -272,6 +375,31 @@ def import_csv(text: str) -> dict[str, Any]:
         if rid:
             row["id"] = rid
     return update({"rows": rows, "template": state.get("template", ""), "attach_resume": None})
+
+
+def import_csv(text: str) -> dict[str, Any]:
+    """POST /api/outreach/import: rows pasted as CSV or copied out of a spreadsheet."""
+    return _replace_rows(parse_csv(text))
+
+
+def import_file(filename: str, data_base64: str) -> dict[str, Any]:
+    """POST /api/outreach/import-file: an .xlsx, .xls, .csv, .tsv or .txt file."""
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in IMPORT_TYPES:
+        raise OutreachError(400, "Import an .xlsx, .xls or .csv file. (In Numbers: File → Export To → Excel or CSV.)")
+    try:
+        data = base64.b64decode(data_base64 or "", validate=True)
+    except ValueError:
+        raise OutreachError(400, "That file didn't upload properly. Try again.") from None
+    if len(data) > MAX_IMPORT_BYTES:
+        raise OutreachError(400, "That file is over 5 MB. Keep just the rows you need and try again.")
+    if suffix in (".xlsx", ".xls"):
+        return _replace_rows(rows_from_records(_sheet_records(data, suffix)))
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("cp1252", errors="replace")
+    return import_csv(text)
 
 
 # -- the resume ---------------------------------------------------------------------------
@@ -394,8 +522,8 @@ async def generate_draft(row_id: str) -> dict[str, Any]:
         row = dict(_find_row(state, row_id))
         template = state["template"]
         resume = state["resume"]
-        missing = [label for field, label in (("org", "organization"), ("role", "role"),
-                                              ("recruiter_name", "recruiter name")) if not row.get(field)]
+        missing = [label for field, label in (("org", "org name"), ("recruiter_name", "contact name"))
+                   if not row.get(field)]
         if missing:
             raise OutreachError(400, f"Fill in the {', '.join(missing)} for this row first.")
         if not template:

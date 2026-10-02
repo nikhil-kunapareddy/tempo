@@ -244,13 +244,14 @@ def test_generate_happy_path(client, fake_claude):
 @pytest.mark.parametrize(
     "rows, template, resume, fragment",
     [
-        ([_row(role="")], TEMPLATE, RESUME, "role"),
-        ([_row(org="", recruiter_name="")], TEMPLATE, RESUME, "organization, recruiter name"),
+        ([_row(recruiter_name="")], TEMPLATE, RESUME, "contact name"),
+        ([_row(org="", recruiter_name="")], TEMPLATE, RESUME, "org name, contact name"),
         ([_row()], "", RESUME, "sample email"),
         ([_row()], TEMPLATE, None, "resume"),
     ],
 )
 def test_generate_needs_inputs(client, fake_claude, rows, template, resume, fragment):
+    """Org and contact name are required; role is optional (the sample email can carry it)."""
     state = _setup(client, rows=rows, template=template, resume=resume)
     r = client.post(f"/api/outreach/generate/{state['rows'][0]['id']}")
     assert r.status_code == 400 and fragment in r.json()["detail"]
@@ -625,7 +626,8 @@ def test_parse_csv(text, expected):
         ("", "Paste at least one row"),
         ("  \n\n", "Paste at least one row"),
         ("org,role,recruiter,email\n", "no rows under it"),
-        ("Acme,DE,Ana,ana@acme.com,extra,more", "Line 1 has 6 columns"),
+        ("ana@acme.com,https://acme.com", "Line 1 has no org name"),
+        ("Acme,DE,Ana,ana@acme", "doesn't look like an email"),
     ],
 )
 def test_parse_csv_rejects(text, fragment):
@@ -652,7 +654,83 @@ def test_import_replaces_rows_and_keeps_matching_drafts(client, fake_claude):
 
 def test_import_reports_bad_rows(client):
     _setup(client)
-    r = client.post("/api/outreach/import", json={"csv": "Acme,DE,Ana,not-an-email"})
+    r = client.post("/api/outreach/import", json={"csv": "org,role,contact,email\nAcme,DE,Ana,not-an-email"})
     assert r.status_code == 400 and "doesn't look like an email" in r.json()["detail"]
     r = client.post("/api/outreach/import", json={"csv": ""})
     assert r.status_code == 400
+
+
+# The user's real sheet: "Org - blurb (city)", an empty column, the website, the contact.
+SHEET = [
+    ("Superluminal Medicines Inc. - AI-driven GPCR drug design (Boston)", "", "https://www.superluminalrx.com/", "Georgia McGaughey"),
+    ("Aureka Biotechnologies, Inc. - AI antibody discovery (Laguna Hills)", "", "https://www.aurekabio.com/", "Weian Zhao"),
+    ("Manifold Bio - AI protein engineering platform (Boston)", "", "https://www.manifold.bio/", "Gleb Kuznetsov"),
+]
+SHEET_ROWS = [
+    ("Superluminal Medicines Inc.", "Georgia McGaughey", "AI-driven GPCR drug design (Boston)", "https://www.superluminalrx.com/"),
+    ("Aureka Biotechnologies, Inc.", "Weian Zhao", "AI antibody discovery (Laguna Hills)", "https://www.aurekabio.com/"),
+    ("Manifold Bio", "Gleb Kuznetsov", "AI protein engineering platform (Boston)", "https://www.manifold.bio/"),
+]
+_shape = lambda rows: [(r["org"], r["recruiter_name"], r["about"], r["website"]) for r in rows]
+
+
+@pytest.mark.parametrize("sep", ["\t", "        "], ids=["copied from Excel (tabs)", "tabs turned into spaces"])
+def test_parse_cells_copied_from_a_sheet(sep):
+    rows = outreach.parse_csv("\n".join(sep.join(cells) for cells in SHEET))
+    assert _shape(rows) == SHEET_ROWS
+    assert all(r["role"] == "" and r["recruiter_email"] == "" for r in rows)
+
+
+def test_parse_header_with_about_and_website():
+    rows = outreach.parse_csv("Company,Website,Description,Founder,Email\nManifold Bio,manifold.bio,Protein design,Gleb,gleb@manifold.bio")
+    assert rows == [{"org": "Manifold Bio", "role": "", "recruiter_name": "Gleb", "recruiter_email": "gleb@manifold.bio",
+                     "about": "Protein design", "website": "manifold.bio"}]
+
+
+def _xlsx(records) -> bytes:
+    import io as _io
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    for rec in records:
+        book.active.append(list(rec))
+    out = _io.BytesIO()
+    book.save(out)
+    return out.getvalue()
+
+
+def test_import_xlsx_file(client):
+    _setup(client)
+    r = client.post("/api/outreach/import-file", json={"filename": "Leads.XLSX", "data_base64": _b64(_xlsx(SHEET))})
+    assert r.status_code == 200, r.text
+    assert _shape(r.json()["rows"]) == SHEET_ROWS
+
+
+def test_import_xlsx_with_header_and_numbers(client):
+    _setup(client)
+    sheet = [("Org", "Role", "Contact", "Email", "Batch"), ("Acme", "SRE", "Ana", "ana@acme.com", 2024.0)]
+    rows = client.post("/api/outreach/import-file", json={"filename": "a.xlsx", "data_base64": _b64(_xlsx(sheet))}).json()["rows"]
+    assert [(r["org"], r["role"], r["recruiter_name"], r["recruiter_email"]) for r in rows] == [("Acme", "SRE", "Ana", "ana@acme.com")]
+
+
+def test_import_csv_file_with_bom(client):
+    _setup(client)
+    text = "﻿org,role,recruiter name,email\nAcme,SRE,Ana,ana@acme.com\n"
+    r = client.post("/api/outreach/import-file", json={"filename": "leads.csv", "data_base64": _b64(text.encode("utf-8"))})
+    assert r.status_code == 200, r.text
+    assert r.json()["rows"][0]["org"] == "Acme"  # the BOM didn't stick to the header
+
+
+@pytest.mark.parametrize(
+    "filename, data, fragment",
+    [
+        ("leads.numbers", b"x", "In Numbers: File"),
+        ("leads.xlsx", b"not a zip", "Couldn't read that spreadsheet"),
+        ("leads.xls", b"not an xls", "Couldn't read that spreadsheet"),
+    ],
+)
+def test_import_file_rejects(client, filename, data, fragment):
+    _setup(client)
+    r = client.post("/api/outreach/import-file", json={"filename": filename, "data_base64": _b64(data)})
+    assert r.status_code == 400 and fragment in r.json()["detail"]

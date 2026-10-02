@@ -96,7 +96,11 @@
     details > summary { cursor:pointer; }
     .grid-wrap { overflow-x:auto; }
     textarea.csv { font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre; overflow-x:auto; }
-    table.grid { border-collapse:collapse; width:100%; min-width:720px; }
+    table.grid { border-collapse:collapse; width:100%; min-width:1150px; }
+    .grid .f-about { min-width:260px; }
+    .grid .f-org, .grid .f-recruiter_email, .grid .f-website { min-width:160px; }
+    .grid .f-role, .grid .f-recruiter_name { min-width:130px; }
+    textarea.csv.over { border-color:var(--accent); }
     .grid th { font-size:12px; color:var(--muted); font-weight:500; text-align:left; padding:0 4px 6px; }
     .grid td { padding:3px 4px; vertical-align:middle; }
     .grid input { padding:7px 9px; }
@@ -218,17 +222,19 @@
 
             <section class="section">
               <h3>Recipients</h3>
-              <label class="hint" for="or-csv">Paste rows from a CSV or a spreadsheet, then Apply. A header row is optional; with one, columns can be in any order.</label>
+              <label class="hint" for="or-csv">Paste rows from Excel, Sheets or a CSV — or import the file. Tempo works out which column is the org, contact, email and website; a header row helps but isn't needed.</label>
               <textarea id="or-csv" class="csv" rows="5" spellcheck="false" autocomplete="off"
-                placeholder="org,role,recruiter name,recruiter email&#10;Acme Robotics,Data Engineer,Ana Lopez,ana@acme.com&#10;Globex,Backend Engineer,Raj Patel,raj@globex.com"></textarea>
+                placeholder="Superluminal Medicines Inc. - AI-driven GPCR drug design (Boston)&#9;https://www.superluminalrx.com/&#9;Georgia McGaughey&#10;&#10;org,role,contact name,contact email,website&#10;Acme Robotics,Data Engineer,Ana Lopez,ana@acme.com,https://acme.example"></textarea>
               <div class="row-line">
                 <button class="secondary small" id="or-csv-apply">Apply</button>
+                <input type="file" id="or-csv-file" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden />
+                <button class="secondary small" id="or-csv-import">Import file…</button>
                 <span class="hint" id="or-csv-note">Replaces the table below. Rows that match an existing one keep their draft.</span>
               </div>
               <div class="inline-err" id="or-csv-err" hidden></div>
               <div class="grid-wrap">
                 <table class="grid">
-                  <thead><tr><th>Org name</th><th>Role</th><th>Recruiter name</th><th>Recruiter email</th><th>Status</th><th></th></tr></thead>
+                  <thead><tr><th class="f-org">Org</th><th class="f-role">Role</th><th class="f-recruiter_name">Contact name</th><th class="f-recruiter_email">Contact email</th><th class="f-about">About</th><th class="f-website">Website</th><th>Status</th><th></th></tr></thead>
                   <tbody id="or-rows"></tbody>
                 </table>
               </div>
@@ -510,22 +516,29 @@
       }
     });
 
-    // -- outreach: a table of recruiters → Claude Code drafts a personalized email per row,
+    // -- outreach: a table of contacts → Claude Code drafts a personalized email per row,
     // reviewed here, then saved to Gmail drafts. The server keeps the state; this page keeps
     // its own copy of what's being typed and only takes ids, drafts and flags back from it, so
     // a save landing mid-keystroke never overwrites the field under the cursor.
     const outreach = (() => {
       const $ = (id) => document.getElementById(id);
-      const FIELDS = ["org", "role", "recruiter_name", "recruiter_email"];
-      const LABELS = { org: "Org name", role: "Role", recruiter_name: "Recruiter name", recruiter_email: "Recruiter email" };
-      const PLACEHOLDERS = { org: "Acme Inc.", role: "Software Engineer", recruiter_name: "Jordan Lee", recruiter_email: "jordan@acme.com" };
+      const FIELDS = ["org", "role", "recruiter_name", "recruiter_email", "about", "website"];
+      const LABELS = {
+        org: "Org", role: "Role", recruiter_name: "Contact name", recruiter_email: "Contact email",
+        about: "About", website: "Website",
+      };
+      const PLACEHOLDERS = {
+        org: "Acme Inc.", role: "optional", recruiter_name: "Jordan Lee", recruiter_email: "optional",
+        about: "what they do — optional", website: "optional",
+      };
+      const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
       const CONCURRENCY = 3;
       const DEBOUNCE_MS = 600;
       const MAX_RESUME_BYTES = 10 * 1024 * 1024;
       const GMAIL_DRAFTS_URL = "https://mail.google.com/mail/#drafts";
 
       let loaded = false, loading = null;
-      let rows = [];          // {key, id, org, role, recruiter_name, recruiter_email}; id is null until the server assigns one
+      let rows = [];          // {key, id, ...FIELDS}; id is null until the server assigns one
       let template = "";
       let attachResume = true;
       let resume = null;
@@ -541,14 +554,15 @@
       const savingIds = new Set();
       const rowEls = new Map();       // row key -> {tr, st, errTr, inputs}
       const cards = {};               // row id -> card elements
-      let running = false, stopRequested = false, savingAll = false;
+      let running = false, stopRequested = false, savingAll = false, importing = false;
 
       const newRow = (r = {}) => ({
         key: "k" + ++keySeq, id: r.id || null,
-        org: r.org || "", role: r.role || "", recruiter_name: r.recruiter_name || "", recruiter_email: r.recruiter_email || "",
+        ...Object.fromEntries(FIELDS.map((f) => [f, r[f] || ""])),
       });
-      const pick = (r) => ({ org: r.org, role: r.role, recruiter_name: r.recruiter_name, recruiter_email: r.recruiter_email });
-      const isComplete = (r) => !!(r.org.trim() && r.role.trim() && r.recruiter_name.trim());
+      const pick = (r) => Object.fromEntries(FIELDS.map((f) => [f, r[f]]));
+      // Role is optional: Claude takes it from the sample email when the row has none.
+      const isComplete = (r) => !!(r.org.trim() && r.recruiter_name.trim());
       const rowById = (id) => rows.find((r) => r.id === id);
       const hasContent = (d) => !!d && (d.status === "ready" || d.status === "saved" || !!(d.subject || d.body));
 
@@ -792,18 +806,20 @@
           const inputs = {};
           FIELDS.forEach((f) => {
             const td = document.createElement("td");
+            td.className = "f-" + f;
             const input = document.createElement("input");
             input.value = row[f];
             input.placeholder = PLACEHOLDERS[f];
             input.setAttribute("aria-label", LABELS[f]);
             input.autocomplete = "off";
             if (f === "recruiter_email") input.type = "email";
+            if (f === "website") input.inputMode = "url";
             input.addEventListener("input", () => {
               row[f] = input.value;
               markDirty();
               if (row.id && cards[row.id]) updateCard(row.id);
             });
-            if (f === "recruiter_email") {
+            if (f === FIELDS[FIELDS.length - 1]) {
               input.addEventListener("keydown", (e) => {
                 if (e.key === "Enter" && rows[rows.length - 1] === row) {
                   e.preventDefault();
@@ -856,28 +872,71 @@
         addRow();
       });
 
-      // Pasted CSV replaces the table. Parsing is the server's (POST /api/outreach/import), so a
-      // quoted comma or a spreadsheet's tabs mean the same thing here as in the tests.
-      $("or-csv-apply").addEventListener("click", async (e) => {
-        e.preventDefault();
-        const btn = $("or-csv-apply");
-        btn.disabled = true;
+      // Pasted cells and imported files replace the table. Parsing is the server's (POST
+      // /api/outreach/import and /import-file), so a quoted comma, a spreadsheet's tabs or an
+      // .xlsx mean the same thing here as in the tests.
+      async function importRows(path, body, done) {
+        if (importing || running) return;
+        importing = true;
+        syncButtons();
         showErr($("or-csv-err"), "");
         try {
-          await save();  // the import keeps the sample email it finds on the server
-          const state = await api("POST", "/api/outreach/import", { csv: $("or-csv").value });
+          if (!(await save())) throw new Error("The table couldn't be saved, so nothing was imported.");
+          const state = await api("POST", path, body);
           const n = (state.rows || []).length;
           rows = (state.rows || []).map(newRow);
           if (!rows.length) rows.push(newRow());
           Object.keys(rowErrors).forEach((k) => delete rowErrors[k]);
           renderGrid();
           mergeDrafts(state.drafts || {}, ++seq);
-          $("or-csv-note").textContent = `Applied ${n} row${n === 1 ? "" : "s"}.`;
+          $("or-csv-note").textContent = done(`${n} row${n === 1 ? "" : "s"}`);
         } catch (err) {
           showErr($("or-csv-err"), err.message);
         } finally {
+          importing = false;
           syncButtons();
         }
+      }
+
+      async function importFile(file) {
+        if (file.size > MAX_IMPORT_BYTES) return showErr($("or-csv-err"), "That file is over 10 MB.");
+        let data;
+        try {
+          data = await readBase64(file);
+        } catch (err) {
+          return showErr($("or-csv-err"), err.message);
+        }
+        await importRows("/api/outreach/import-file", { filename: file.name, data_base64: data },
+          (n) => `Imported ${n} from ${file.name}.`);
+      }
+
+      $("or-csv-apply").addEventListener("click", (e) => {
+        e.preventDefault();
+        importRows("/api/outreach/import", { csv: $("or-csv").value }, (n) => `Applied ${n}.`);
+      });
+      $("or-csv-import").addEventListener("click", (e) => {
+        e.preventDefault();
+        $("or-csv-file").click();
+      });
+      $("or-csv-file").addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = "";  // so picking the same file again still fires
+        if (file) importFile(file);
+      });
+      // A file dropped on the paste box is imported; dragged text still drops in as text.
+      const csvBox = $("or-csv");
+      const carriesFiles = (e) => !!(e.dataTransfer && [...e.dataTransfer.types].includes("Files"));
+      ["dragenter", "dragover"].forEach((t) => csvBox.addEventListener(t, (e) => {
+        if (!carriesFiles(e)) return;
+        e.preventDefault();
+        csvBox.classList.add("over");
+      }));
+      ["dragleave", "drop"].forEach((t) => csvBox.addEventListener(t, () => csvBox.classList.remove("over")));
+      csvBox.addEventListener("drop", (e) => {
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file) return;
+        e.preventDefault();
+        importFile(file);
       });
 
       function rowStatus(row) {
@@ -928,7 +987,7 @@
         if (!targets.length) {
           return showErr(errEl, rows.some(isComplete)
             ? "Every row already has an up-to-date draft. Use Regenerate on a draft to write it again."
-            : "Fill in org name, role and recruiter name for at least one row.");
+            : "Fill in the org and contact name for at least one row.");
         }
         running = true;
         stopRequested = false;
@@ -949,7 +1008,7 @@
           running = false;
           syncButtons();
           $("or-progress").textContent = "";
-          return showErr(errEl, "Nothing to generate yet — fill in org name, role and recruiter name for a row.");
+          return showErr(errEl, "Nothing to generate yet — fill in the org and contact name for a row.");
         }
         let done = 0, failed = 0, inFlight = 0;
         const progress = () => { $("or-progress").textContent = `Generating ${Math.min(done + 1, total)} of ${total}…`; };
@@ -1100,7 +1159,9 @@
         if (!c || !d) return;
         const row = rowById(id);
         const part = (v) => (v && v.trim()) || "—";
-        c.label.textContent = row ? `${part(row.recruiter_name)} · ${part(row.org)} — ${part(row.role)}` : "—";
+        c.label.textContent = row
+          ? `${part(row.recruiter_name)} · ${part(row.org)}${row.role.trim() ? " — " + row.role.trim() : ""}`
+          : "—";
 
         c.badges.textContent = "";
         const badge = (text, cls) => {
@@ -1228,7 +1289,8 @@
         const claudeOff = !!(status && status.claude && status.claude.available === false);
         const gen = $("or-generate");
         gen.disabled = running || claudeOff;
-        $("or-csv-apply").disabled = running;
+        $("or-csv-apply").disabled = running || importing;
+        $("or-csv-import").disabled = running || importing;
         gen.title = claudeOff ? (status.claude.message || "Claude Code isn't available.") : "";
         $("or-stop").hidden = !running;
         $("or-stop").disabled = stopRequested;

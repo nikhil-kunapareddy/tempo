@@ -79,6 +79,8 @@ class OutreachRowIn(BaseModel):
     role: str = ""
     recruiter_name: str = ""
     recruiter_email: str = ""
+    about: str = ""
+    website: str = ""
 
 
 class OutreachIn(BaseModel):
@@ -228,6 +230,12 @@ def outreach_update(body: OutreachIn) -> dict[str, Any]:
 def outreach_import(body: CsvIn) -> dict[str, Any]:
     """Replace the recipients table with rows pasted as CSV."""
     return _outreach(lambda: outreach.import_csv(body.csv))
+
+
+@app.post("/api/outreach/import-file")
+def outreach_import_file(body: ResumeIn) -> dict[str, Any]:
+    """Replace the recipients table with an .xlsx, .xls or .csv file's rows."""
+    return _outreach(lambda: outreach.import_file(body.filename, body.data_base64))
 
 
 @app.get("/api/outreach/status")
