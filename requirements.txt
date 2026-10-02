@@ -7,7 +7,14 @@ python-dotenv>=1.0
 cryptography>=42
 pytest>=8
 
-# The macOS desktop shell (desktop/shell.py). WebKit pulls in Cocoa/Quartz itself, but both
-# are named so the import surface the shell actually uses is explicit.
+# The macOS desktop shell (desktop/shell.py). WebKit pulls in Cocoa itself, but both are
+# named so the import surface the shell actually uses is explicit.
 pyobjc-framework-Cocoa>=10.1
 pyobjc-framework-WebKit>=10.1
+
+# Outreach (backend/app/claude_code.py): drives the user's installed Claude Code. The wheel
+# bundles its own copy of the CLI, which the PyInstaller spec leaves out of the app.
+claude-agent-sdk>=0.2
+
+# Outreach resume reading (backend/app/outreach.py): PDF text via macOS's PDFKit.
+pyobjc-framework-Quartz>=10.1

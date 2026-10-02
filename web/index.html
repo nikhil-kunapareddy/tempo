@@ -62,6 +62,59 @@
     .update-banner[hidden] { display:none; }
     .update-banner span { flex:1; }
     .update-banner button { padding:6px 12px; }
+
+    /* -- tabs -- */
+    .tabs { display:flex; gap:4px; padding:10px 24px 0; border-bottom:1px solid var(--border); }
+    .tab { background:transparent; color:var(--muted); border:1px solid transparent; border-bottom:0;
+           border-radius:8px 8px 0 0; padding:7px 14px; margin-bottom:-1px; }
+    .tab.active { color:var(--text); background:var(--bg); border-color:var(--border); }
+    .view { flex:1; min-height:0; display:flex; flex-direction:column; }
+    .view[hidden] { display:none; }
+
+    /* -- outreach -- */
+    textarea { background:var(--panel); border:1px solid var(--border); color:var(--text); border-radius:8px;
+               padding:9px 11px; font:inherit; width:100%; resize:vertical; }
+    .outreach { flex:1; overflow-y:auto; padding:20px 24px 32px; }
+    .outreach-body { display:flex; flex-direction:column; gap:14px; }
+    .outreach-body[hidden] { display:none; }
+    .section { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px;
+               display:flex; flex-direction:column; gap:10px; min-width:0; }
+    .section h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0; }
+    .section textarea, .grid input, .draft-card input, .draft-card textarea { background:var(--bg); }
+    .row-line { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .status-strip { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+    .status-strip .pills { margin:0; }
+    button.small { padding:6px 12px; font-size:13px; }
+    button.icon { padding:4px 10px; background:transparent; border:1px solid var(--border); color:var(--muted); }
+    .inline-err { font-size:12px; color:#ffd7dc; white-space:pre-wrap; }
+    .inline-err[hidden] { display:none; }
+    .drop { border:1px dashed var(--border); border-radius:10px; padding:12px; }
+    .drop.over { border-color:var(--accent); background:rgba(79,140,255,.08); }
+    pre.preview { white-space:pre-wrap; word-wrap:break-word; font:12px/1.5 ui-monospace,Menlo,monospace; color:var(--muted);
+                  max-height:220px; overflow:auto; background:var(--bg); border:1px solid var(--border);
+                  border-radius:8px; padding:8px 10px; margin:8px 0 0; }
+    details > summary { cursor:pointer; }
+    .grid-wrap { overflow-x:auto; }
+    table.grid { border-collapse:collapse; width:100%; min-width:720px; }
+    .grid th { font-size:12px; color:var(--muted); font-weight:500; text-align:left; padding:0 4px 6px; }
+    .grid td { padding:3px 4px; vertical-align:middle; }
+    .grid input { padding:7px 9px; }
+    .grid td.st { font-size:12px; color:var(--muted); width:120px; white-space:nowrap; }
+    .grid td.st.ok { color:var(--ok); }
+    .grid td.st.bad { color:#ffd7dc; }
+    .grid td.rm { width:40px; text-align:right; }
+    .grid tr.err-row td { padding:0 4px 6px; }
+    .drafts { display:flex; flex-direction:column; gap:8px; }
+    .draft-card { border:1px solid var(--border); border-radius:10px; }
+    .draft-card > summary { list-style:none; display:flex; align-items:center; gap:8px; padding:10px 12px; }
+    .draft-card > summary::-webkit-details-marker { display:none; }
+    .draft-card > summary .label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .draft-card .card-body { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+    .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+    .badge.ok { color:var(--ok); }
+    .badge.bad { color:#ffd7dc; }
+    .badge.stale { color:var(--accent); border-color:var(--accent); }
+    .hint a { color:var(--accent); }
   </style>
 </head>
 <body>
@@ -109,13 +162,96 @@
         <button id="update-install">Restart to update</button>
         <button class="secondary" id="update-dismiss">Later</button>
       </div>
-      <div id="log">
-        <div class="empty" id="empty">Ask Tempo about your calendar — e.g. “what's on Thursday?” or “add a standup Thursday at 9am”.</div>
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="chat" role="tab" aria-selected="true">Chat</button>
+        <button class="tab" data-tab="outreach" role="tab" aria-selected="false">Outreach</button>
       </div>
-      <form class="composer" id="chat">
-        <input id="box" placeholder="Message Tempo…" autocomplete="off" />
-        <button type="submit" id="send">Send</button>
-      </form>
+
+      <div class="view" id="view-chat">
+        <div id="log">
+          <div class="empty" id="empty">Ask Tempo about your calendar — e.g. “what's on Thursday?” or “add a standup Thursday at 9am”.</div>
+        </div>
+        <form class="composer" id="chat">
+          <input id="box" placeholder="Message Tempo…" autocomplete="off" />
+          <button type="submit" id="send">Send</button>
+        </form>
+      </div>
+
+      <div class="view" id="view-outreach" hidden>
+        <div class="outreach">
+          <div class="status-strip">
+            <div class="pills">
+              <span class="pill" id="or-pill-claude"><span class="dot"></span><span id="or-claude-label">Claude Code</span></span>
+              <span class="pill" id="or-pill-gmail"><span class="dot"></span>Gmail drafts</span>
+            </div>
+            <button class="secondary small" id="or-reconnect" hidden>Reconnect Google</button>
+          </div>
+          <div class="hint" id="or-status-msg"></div>
+          <div class="inline-err" id="or-load-err" hidden></div>
+          <div class="hint" id="or-loading">Loading…</div>
+
+          <div class="outreach-body" id="or-body" hidden>
+            <section class="section">
+              <h3>Resume</h3>
+              <div class="drop" id="or-drop">
+                <div class="row-line">
+                  <input type="file" id="or-resume-file" accept=".pdf,.docx,.doc,.rtf,.txt,.md" hidden />
+                  <button class="secondary small" id="or-resume-pick">Choose file…</button>
+                  <span class="hint" id="or-resume-info">No resume yet — choose a file or drop it here.</span>
+                  <span class="spacer"></span>
+                  <button class="secondary small" id="or-resume-remove" hidden>Remove</button>
+                </div>
+                <details id="or-resume-preview-wrap" hidden>
+                  <summary class="hint">Preview</summary>
+                  <pre class="preview" id="or-resume-preview"></pre>
+                </details>
+              </div>
+              <label class="check"><input type="checkbox" id="or-attach" /> Attach resume to drafts</label>
+              <div class="inline-err" id="or-resume-err" hidden></div>
+            </section>
+
+            <section class="section">
+              <h3>Sample email</h3>
+              <label class="hint" for="or-template">Paste an email you've written before — Tempo keeps its tone and structure and personalizes it for each row.</label>
+              <textarea id="or-template" rows="8"></textarea>
+            </section>
+
+            <section class="section">
+              <h3>Recipients</h3>
+              <div class="grid-wrap">
+                <table class="grid">
+                  <thead><tr><th>Org name</th><th>Role</th><th>Recruiter name</th><th>Recruiter email</th><th>Status</th><th></th></tr></thead>
+                  <tbody id="or-rows"></tbody>
+                </table>
+              </div>
+              <div class="row-line">
+                <button class="secondary small" id="or-add-row">Add row</button>
+                <span class="hint" id="or-save-note"></span>
+              </div>
+              <div class="inline-err" id="or-save-err" hidden></div>
+            </section>
+
+            <section class="section">
+              <div class="row-line">
+                <button id="or-generate">Generate drafts</button>
+                <button class="secondary" id="or-stop" hidden>Stop</button>
+                <span class="hint" id="or-progress"></span>
+              </div>
+              <div class="inline-err" id="or-gen-err" hidden></div>
+            </section>
+
+            <section class="section" id="or-review" hidden>
+              <div class="row-line">
+                <h3>Drafts</h3>
+                <span class="spacer"></span>
+                <span class="hint" id="or-save-progress"></span>
+                <button class="small" id="or-save-all">Save all to Gmail drafts</button>
+              </div>
+              <div class="drafts" id="or-drafts"></div>
+            </section>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -350,6 +486,795 @@
         box.focus();
       }
     });
+
+    // -- outreach: a table of recruiters → Claude Code drafts a personalized email per row,
+    // reviewed here, then saved to Gmail drafts. The server keeps the state; this page keeps
+    // its own copy of what's being typed and only takes ids, drafts and flags back from it, so
+    // a save landing mid-keystroke never overwrites the field under the cursor.
+    const outreach = (() => {
+      const $ = (id) => document.getElementById(id);
+      const FIELDS = ["org", "role", "recruiter_name", "recruiter_email"];
+      const LABELS = { org: "Org name", role: "Role", recruiter_name: "Recruiter name", recruiter_email: "Recruiter email" };
+      const PLACEHOLDERS = { org: "Acme Inc.", role: "Software Engineer", recruiter_name: "Jordan Lee", recruiter_email: "jordan@acme.com" };
+      const CONCURRENCY = 3;
+      const DEBOUNCE_MS = 600;
+      const MAX_RESUME_BYTES = 10 * 1024 * 1024;
+      const GMAIL_DRAFTS_URL = "https://mail.google.com/mail/#drafts";
+
+      let loaded = false, loading = null;
+      let rows = [];          // {key, id, org, role, recruiter_name, recruiter_email}; id is null until the server assigns one
+      let template = "";
+      let attachResume = true;
+      let resume = null;
+      let drafts = {};        // row id -> Draft
+      let status = null;      // GET /api/outreach/status, or null if it couldn't be read
+      let keySeq = 0, seq = 0;
+      const draftSeq = {};    // row id -> seq of the latest local change to that draft
+      const draftDirty = new Set();
+      const draftTimers = {}, draftChains = {};
+      const cardErrors = {};
+      const generating = new Set();   // row keys with a generate request in flight
+      const rowErrors = {};           // row key -> why its last generate failed
+      const savingIds = new Set();
+      const rowEls = new Map();       // row key -> {tr, st, errTr, inputs}
+      const cards = {};               // row id -> card elements
+      let running = false, stopRequested = false, savingAll = false;
+
+      const newRow = (r = {}) => ({
+        key: "k" + ++keySeq, id: r.id || null,
+        org: r.org || "", role: r.role || "", recruiter_name: r.recruiter_name || "", recruiter_email: r.recruiter_email || "",
+      });
+      const pick = (r) => ({ org: r.org, role: r.role, recruiter_name: r.recruiter_name, recruiter_email: r.recruiter_email });
+      const isComplete = (r) => !!(r.org.trim() && r.role.trim() && r.recruiter_name.trim());
+      const rowById = (id) => rows.find((r) => r.id === id);
+      const hasContent = (d) => !!d && (d.status === "ready" || d.status === "saved" || !!(d.subject || d.body));
+
+      function showErr(el, msg) {
+        el.textContent = msg || "";
+        el.hidden = !msg;
+      }
+
+      function button(text, cls) {
+        const b = document.createElement("button");
+        b.textContent = text;
+        if (cls) b.className = cls;
+        return b;
+      }
+
+      async function api(method, url, body) {
+        const opts = { method, headers: {} };
+        if (body !== undefined) {
+          opts.headers["Content-Type"] = "application/json";
+          opts.body = JSON.stringify(body);
+        }
+        let res;
+        try {
+          res = await fetch(url, opts);
+        } catch (e) {
+          throw new Error("Tempo's server isn't responding.");
+        }
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* empty or non-JSON body */ }
+        if (!res.ok) {
+          const d = data && data.detail;
+          if (typeof d === "string" && d) throw new Error(d);
+          if (Array.isArray(d)) throw new Error(d.map((x) => x.msg || String(x)).join("; "));
+          throw new Error(`Request failed (${res.status}).`);
+        }
+        return data;
+      }
+
+      // -- table, sample email, attach flag: debounced, serialized saves ----------------------
+      let dirty = false, saveTimer = null, chain = Promise.resolve();
+
+      function markDirty() {
+        dirty = true;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(save, DEBOUNCE_MS);
+      }
+
+      // One PUT at a time, each sending whatever is current when it starts. Resolves true once
+      // everything typed so far is on the server.
+      function save() {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        const run = chain.then(put);
+        chain = run.catch(() => {});
+        return run;
+      }
+
+      async function put() {
+        if (!dirty) return true;
+        dirty = false;
+        // A row that's still entirely blank isn't sent until something is typed into it.
+        const sent = rows
+          .filter((r) => r.id || FIELDS.some((f) => r[f].trim()))
+          .map((r) => ({ row: r, fields: pick(r) }));
+        const sentAt = ++seq;
+        $("or-save-note").textContent = "Saving…";
+        try {
+          const state = await api("PUT", "/api/outreach", {
+            rows: sent.map((s) => (s.row.id ? { id: s.row.id, ...s.fields } : s.fields)),
+            template,
+            attach_resume: attachResume,
+          });
+          assignIds(sent, state.rows || []);
+          mergeDrafts(state.drafts || {}, sentAt);
+          $("or-save-note").textContent = "Saved";
+          showErr($("or-save-err"), "");
+          return true;
+        } catch (err) {
+          dirty = true;  // retried on the next edit, or before generating
+          $("or-save-note").textContent = "";
+          showErr($("or-save-err"), "Couldn't save: " + err.message);
+          return false;
+        }
+      }
+
+      // New rows go up without an id; find theirs in the reply. Match on content first (so a
+      // server that drops blank rows can't shift everything by one), then on order.
+      function assignIds(sent, serverRows) {
+        const known = new Set(rows.map((r) => r.id).filter(Boolean));
+        const fresh = serverRows.filter((r) => r.id && !known.has(r.id));
+        const claimed = new Set();
+        const same = (a, b) => FIELDS.every((f) => String(a[f] || "").trim() === String(b[f] || "").trim());
+        const pending = sent.filter((s) => !s.row.id);
+        for (const s of pending) {
+          const m = fresh.find((r) => !claimed.has(r.id) && same(r, s.fields));
+          if (m) { claimed.add(m.id); s.row.id = m.id; }
+        }
+        for (const s of pending) {
+          if (s.row.id || !FIELDS.some((f) => s.fields[f].trim())) continue;
+          const m = fresh.find((r) => !claimed.has(r.id));
+          if (m) { claimed.add(m.id); s.row.id = m.id; }
+        }
+      }
+
+      // Take drafts from a State reply, except ones changed here after that request went out.
+      function mergeDrafts(serverDrafts, sentAt) {
+        for (const [id, d] of Object.entries(serverDrafts)) {
+          if ((draftSeq[id] || 0) > sentAt) continue;
+          const local = drafts[id];
+          drafts[id] = local && draftDirty.has(id) ? { ...d, subject: local.subject, body: local.body } : d;
+        }
+        for (const id of Object.keys(drafts)) {
+          if (!(id in serverDrafts) && (draftSeq[id] || 0) <= sentAt) delete drafts[id];
+        }
+        renderDrafts();
+        renderRowStatuses();
+      }
+
+      // -- status strip ------------------------------------------------------------------------
+      const canDraft = () => !status || !!(status.gmail && status.gmail.can_draft);
+
+      function gmailWhy() {
+        const g = (status && status.gmail) || {};
+        if (g.message) return g.message;
+        return g.connected ? "Reconnect Google to allow Gmail drafts." : "Connect Google in Settings to save Gmail drafts.";
+      }
+
+      async function refreshStatus() {
+        try {
+          status = await api("GET", "/api/outreach/status");
+        } catch (err) {
+          status = null;
+          $("or-status-msg").textContent = "Couldn't check Claude Code and Gmail: " + err.message;
+          syncButtons();
+          return;
+        }
+        const c = status.claude || {}, g = status.gmail || {};
+        const version = String(c.version || "").match(/\d+(\.\d+)+/);
+        $("or-pill-claude").classList.toggle("on", !!c.available);
+        $("or-claude-label").textContent = c.available && version ? `Claude Code ${version[0]}` : "Claude Code";
+        $("or-pill-gmail").classList.toggle("on", !!g.can_draft);
+        $("or-reconnect").hidden = !(g.connected && !g.can_draft);
+        const msgs = [];
+        if (!c.available) msgs.push(c.message || "Claude Code isn't available.");
+        if (!g.can_draft) msgs.push(gmailWhy());
+        $("or-status-msg").textContent = msgs.join(" ");
+        syncButtons();
+      }
+
+      $("or-reconnect").addEventListener("click", (e) => {
+        e.preventDefault();
+        window.location.href = "/api/google/login";
+      });
+
+      // -- resume --------------------------------------------------------------------------
+      function renderResume() {
+        const has = !!resume;
+        $("or-resume-info").textContent = has
+          ? `${resume.filename} · ${Number(resume.chars || 0).toLocaleString()} characters`
+          : "No resume yet — choose a file or drop it here.";
+        $("or-resume-pick").textContent = has ? "Replace…" : "Choose file…";
+        $("or-resume-remove").hidden = !has;
+        $("or-resume-preview-wrap").hidden = !(has && resume.preview);
+        $("or-resume-preview").textContent = has ? resume.preview || "" : "";
+        $("or-attach").checked = attachResume;
+      }
+
+      function readBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(",") + 1));
+          reader.onerror = () => reject(new Error("That file couldn't be read."));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      async function uploadResume(file) {
+        const errEl = $("or-resume-err");
+        showErr(errEl, "");
+        if (file.size > MAX_RESUME_BYTES) return showErr(errEl, "That file is over 10 MB.");
+        $("or-resume-info").textContent = `Reading ${file.name}…`;
+        try {
+          const data = await readBase64(file);
+          const sentAt = ++seq;
+          const state = await api("POST", "/api/outreach/resume", { filename: file.name, data_base64: data });
+          resume = state.resume || null;
+          mergeDrafts(state.drafts || {}, sentAt);
+        } catch (err) {
+          showErr(errEl, err.message);
+        }
+        renderResume();
+      }
+
+      $("or-resume-pick").addEventListener("click", (e) => {
+        e.preventDefault();
+        $("or-resume-file").click();
+      });
+      $("or-resume-file").addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = "";  // so picking the same file again still fires
+        if (file) uploadResume(file);
+      });
+      $("or-resume-remove").addEventListener("click", async (e) => {
+        e.preventDefault();
+        showErr($("or-resume-err"), "");
+        try {
+          const sentAt = ++seq;
+          const state = await api("DELETE", "/api/outreach/resume");
+          resume = state.resume || null;
+          mergeDrafts(state.drafts || {}, sentAt);
+        } catch (err) {
+          showErr($("or-resume-err"), err.message);
+        }
+        renderResume();
+      });
+
+      // Dropping a file anywhere else would navigate the window to it; only the drop zone takes files.
+      const drop = $("or-drop");
+      ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+      ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) uploadResume(file);
+      });
+      window.addEventListener("dragover", (e) => e.preventDefault());
+      window.addEventListener("drop", (e) => e.preventDefault());
+
+      $("or-attach").addEventListener("change", (e) => {
+        attachResume = e.target.checked;
+        markDirty();
+      });
+
+      $("or-template").addEventListener("input", (e) => {
+        template = e.target.value;
+        markDirty();
+      });
+
+      // -- recipients grid ------------------------------------------------------------------
+      // Rebuilt only when rows are added or removed; typing edits the row object in place.
+      function renderGrid(focusKey) {
+        const tbody = $("or-rows");
+        tbody.textContent = "";
+        rowEls.clear();
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          const inputs = {};
+          FIELDS.forEach((f) => {
+            const td = document.createElement("td");
+            const input = document.createElement("input");
+            input.value = row[f];
+            input.placeholder = PLACEHOLDERS[f];
+            input.setAttribute("aria-label", LABELS[f]);
+            input.autocomplete = "off";
+            if (f === "recruiter_email") input.type = "email";
+            input.addEventListener("input", () => {
+              row[f] = input.value;
+              markDirty();
+              if (row.id && cards[row.id]) updateCard(row.id);
+            });
+            if (f === "recruiter_email") {
+              input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && rows[rows.length - 1] === row) {
+                  e.preventDefault();
+                  addRow();
+                }
+              });
+            }
+            td.append(input);
+            tr.append(td);
+            inputs[f] = input;
+          });
+          const st = document.createElement("td");
+          st.className = "st";
+          const rmTd = document.createElement("td");
+          rmTd.className = "rm";
+          const rm = button("×", "icon");
+          rm.setAttribute("aria-label", "Remove row");
+          rm.title = "Remove row";
+          rm.addEventListener("click", (e) => {
+            e.preventDefault();
+            removeRow(row);
+          });
+          rmTd.append(rm);
+          tr.append(st, rmTd);
+          tbody.append(tr);
+          rowEls.set(row.key, { tr, st, errTr: null, inputs });
+          renderRowStatus(row);
+        });
+        if (focusKey && rowEls.get(focusKey)) rowEls.get(focusKey).inputs.org.focus();
+      }
+
+      function addRow() {
+        const row = newRow();
+        rows.push(row);
+        renderGrid(row.key);
+        markDirty();
+      }
+
+      function removeRow(row) {
+        rows = rows.filter((r) => r !== row);
+        delete rowErrors[row.key];
+        if (!rows.length) rows.push(newRow());
+        renderGrid();
+        markDirty();
+        renderDrafts();
+      }
+
+      $("or-add-row").addEventListener("click", (e) => {
+        e.preventDefault();
+        addRow();
+      });
+
+      function rowStatus(row) {
+        if (generating.has(row.key)) return { text: "Generating…", cls: "" };
+        if (rowErrors[row.key]) return { text: "Error", cls: "bad", detail: rowErrors[row.key] };
+        const d = row.id && drafts[row.id];
+        if (!d) return { text: "", cls: "" };
+        if (d.status === "error") return { text: "Error", cls: "bad", detail: d.error || "Generating this draft failed." };
+        if (d.status === "saved") return { text: d.stale ? "Saved ✓ · stale" : "Saved ✓", cls: "ok" };
+        return { text: d.stale ? "Ready · stale" : "Ready", cls: "" };
+      }
+
+      function renderRowStatus(row) {
+        const els = rowEls.get(row.key);
+        if (!els) return;
+        const s = rowStatus(row);
+        els.st.textContent = s.text;
+        els.st.className = "st" + (s.cls ? " " + s.cls : "");
+        els.st.title = s.detail || "";
+        if (s.detail) {
+          if (!els.errTr) {
+            els.errTr = document.createElement("tr");
+            els.errTr.className = "err-row";
+            const td = document.createElement("td");
+            td.colSpan = 6;
+            const div = document.createElement("div");
+            div.className = "inline-err";
+            td.append(div);
+            els.errTr.append(td);
+            els.tr.after(els.errTr);
+          }
+          els.errTr.querySelector(".inline-err").textContent = s.detail;
+        } else if (els.errTr) {
+          els.errTr.remove();
+          els.errTr = null;
+        }
+      }
+
+      const renderRowStatuses = () => rows.forEach(renderRowStatus);
+
+      // -- generating ---------------------------------------------------------------------
+      async function generate(targets) {
+        if (running) return;
+        const errEl = $("or-gen-err");
+        showErr(errEl, "");
+        if (!resume) return showErr(errEl, "Add your resume first.");
+        if (!template.trim()) return showErr(errEl, "Paste a sample email first.");
+        if (!targets.length) {
+          return showErr(errEl, rows.some(isComplete)
+            ? "Every row already has an up-to-date draft. Use Regenerate on a draft to write it again."
+            : "Fill in org name, role and recruiter name for at least one row.");
+        }
+        running = true;
+        stopRequested = false;
+        syncButtons();
+        $("or-progress").textContent = "Saving the table…";
+        // New rows need their server ids, and a pending edit to a draft must not land on top
+        // of the new text.
+        if (!(await save())) {
+          running = false;
+          syncButtons();
+          $("or-progress").textContent = "";
+          return showErr(errEl, "The table couldn't be saved, so nothing was generated.");
+        }
+        const queue = targets.filter((r) => r.id && rows.includes(r));
+        await Promise.all(queue.map((r) => flushDraft(r.id)));
+        const total = queue.length;
+        if (!total) {
+          running = false;
+          syncButtons();
+          $("or-progress").textContent = "";
+          return showErr(errEl, "Nothing to generate yet — fill in org name, role and recruiter name for a row.");
+        }
+        let done = 0, failed = 0, inFlight = 0;
+        const progress = () => { $("or-progress").textContent = `Generating ${Math.min(done + 1, total)} of ${total}…`; };
+        await new Promise((resolve) => {
+          const launch = () => {
+            while (!stopRequested && inFlight < CONCURRENCY && queue.length) {
+              const row = queue.shift();
+              inFlight++;
+              generateOne(row)
+                .then((ok) => { if (!ok) failed++; })
+                .finally(() => {
+                  inFlight--;
+                  done++;
+                  if (!stopRequested) progress();
+                  launch();
+                });
+            }
+            if (!inFlight && (!queue.length || stopRequested)) resolve();
+          };
+          progress();
+          launch();
+        });
+        const made = done - failed;
+        let msg;
+        if (stopRequested) msg = `Stopped — ${made} of ${total} generated.`;
+        else if (failed) msg = `Generated ${made} of ${total} — ${failed} failed (see the rows marked Error).`;
+        else msg = `Generated ${total} draft${total === 1 ? "" : "s"}.`;
+        $("or-progress").textContent = msg;
+        running = false;
+        stopRequested = false;
+        syncButtons();
+      }
+
+      async function generateOne(row) {
+        const id = row.id;
+        generating.add(row.key);
+        delete rowErrors[row.key];
+        renderRowStatus(row);
+        try {
+          const d = await api("POST", `/api/outreach/generate/${encodeURIComponent(id)}`);
+          drafts[id] = d;
+          draftSeq[id] = ++seq;
+          draftDirty.delete(id);
+          delete cardErrors[id];
+          renderDrafts(id);
+          return d.status !== "error";
+        } catch (err) {
+          rowErrors[row.key] = err.message;
+          return false;
+        } finally {
+          generating.delete(row.key);
+          renderRowStatus(row);
+        }
+      }
+
+      // Rows worth generating: complete, and without a draft that still matches their inputs.
+      function pendingRows() {
+        return rows.filter((r) => {
+          if (!isComplete(r)) return false;
+          const d = r.id && drafts[r.id];
+          return !d || d.stale || d.status === "error";
+        });
+      }
+
+      $("or-generate").addEventListener("click", (e) => {
+        e.preventDefault();
+        generate(pendingRows());
+      });
+      $("or-stop").addEventListener("click", (e) => {
+        e.preventDefault();
+        stopRequested = true;
+        $("or-progress").textContent = "Stopping after the drafts already being written…";
+        syncButtons();
+      });
+
+      // -- review cards ---------------------------------------------------------------------
+      function makeCard(id) {
+        const el = document.createElement("details");
+        el.className = "draft-card";
+        const summary = document.createElement("summary");
+        const label = document.createElement("span");
+        label.className = "label";
+        const badges = document.createElement("span");
+        badges.className = "row-line";
+        summary.append(label, badges);
+        const body = document.createElement("div");
+        body.className = "card-body";
+        const subject = document.createElement("input");
+        subject.placeholder = "Subject";
+        subject.setAttribute("aria-label", "Subject");
+        const text = document.createElement("textarea");
+        text.rows = 12;
+        text.setAttribute("aria-label", "Email body");
+        const actions = document.createElement("div");
+        actions.className = "row-line";
+        const regen = button("Regenerate", "secondary small");
+        const saveBtn = button("Save to Gmail drafts", "small");
+        const savedNote = document.createElement("span");
+        savedNote.className = "hint";
+        actions.append(saveBtn, regen, savedNote);
+        const err = document.createElement("div");
+        err.className = "inline-err";
+        err.hidden = true;
+        body.append(subject, text, actions, err);
+        el.append(summary, body);
+        subject.addEventListener("input", () => editDraft(id, "subject", subject.value));
+        text.addEventListener("input", () => editDraft(id, "body", text.value));
+        regen.addEventListener("click", (e) => {
+          e.preventDefault();
+          const row = rowById(id);
+          if (row) generate([row]);
+        });
+        saveBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          saveToGmail(id);
+        });
+        return { el, label, badges, subject, text, regen, saveBtn, savedNote, err };
+      }
+
+      // Cards follow table order. Inputs are written only when a card is new or its draft was
+      // just (re)generated, so a card being edited keeps its text, focus and caret.
+      function renderDrafts(freshId) {
+        const list = $("or-drafts");
+        const ids = rows.map((r) => r.id).filter((id) => id && hasContent(drafts[id]));
+        for (const id of Object.keys(cards)) {
+          if (!ids.includes(id)) {
+            cards[id].el.remove();
+            delete cards[id];
+          }
+        }
+        ids.forEach((id, i) => {
+          let c = cards[id];
+          const isNew = !c;
+          if (isNew) c = cards[id] = makeCard(id);
+          if (isNew || id === freshId) {
+            c.subject.value = drafts[id].subject || "";
+            c.text.value = drafts[id].body || "";
+            if (id === freshId) c.el.open = true;
+          }
+          if (list.children[i] !== c.el) list.insertBefore(c.el, list.children[i] || null);
+        });
+        $("or-review").hidden = ids.length === 0;
+        syncButtons();
+      }
+
+      function updateCard(id) {
+        const c = cards[id], d = drafts[id];
+        if (!c || !d) return;
+        const row = rowById(id);
+        const part = (v) => (v && v.trim()) || "—";
+        c.label.textContent = row ? `${part(row.recruiter_name)} · ${part(row.org)} — ${part(row.role)}` : "—";
+
+        c.badges.textContent = "";
+        const badge = (text, cls) => {
+          const b = document.createElement("span");
+          b.className = "badge" + (cls ? " " + cls : "");
+          b.textContent = text;
+          c.badges.append(b);
+        };
+        if (row && generating.has(row.key)) badge("Generating…");
+        else if (d.status === "saved") badge("Saved ✓", "ok");
+        else if (d.status === "error") badge("Error", "bad");
+        else badge("Ready");
+        if (d.stale) badge("inputs changed — regenerate?", "stale");
+
+        const saving = savingIds.has(id);
+        c.saveBtn.textContent = saving ? "Saving…" : d.status === "saved" ? "Update Gmail draft" : "Save to Gmail drafts";
+        c.saveBtn.disabled = saving || savingAll || !canDraft() || (row && generating.has(row.key));
+        c.saveBtn.title = canDraft() ? "" : gmailWhy();
+        c.regen.disabled = running || saving;
+
+        c.savedNote.textContent = "";
+        if (d.status === "saved") {
+          const link = document.createElement("a");
+          link.href = GMAIL_DRAFTS_URL;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "Open Gmail drafts";
+          c.savedNote.append("Saved ✓ · ", link);
+        }
+        showErr(c.err, cardErrors[id] || (d.status === "error" ? d.error : ""));
+      }
+
+      function cardError(id, msg) {
+        if (msg) cardErrors[id] = msg;
+        else delete cardErrors[id];
+        updateCard(id);
+      }
+
+      function editDraft(id, field, value) {
+        const d = drafts[id];
+        if (!d) return;
+        d[field] = value;
+        draftSeq[id] = ++seq;
+        draftDirty.add(id);
+        clearTimeout(draftTimers[id]);
+        draftTimers[id] = setTimeout(() => flushDraft(id), DEBOUNCE_MS);
+      }
+
+      // Per-draft chain, so an older edit can never land after a newer one.
+      function flushDraft(id) {
+        clearTimeout(draftTimers[id]);
+        delete draftTimers[id];
+        const run = (draftChains[id] || Promise.resolve()).then(() => putDraft(id));
+        draftChains[id] = run.catch(() => {});
+        return run;
+      }
+
+      async function putDraft(id) {
+        if (!draftDirty.has(id)) return true;
+        const d = drafts[id];
+        if (!d) {
+          draftDirty.delete(id);
+          return true;
+        }
+        draftDirty.delete(id);
+        try {
+          const fresh = await api("PUT", `/api/outreach/drafts/${encodeURIComponent(id)}`, { subject: d.subject, body: d.body });
+          const cur = drafts[id] || fresh;
+          // Whatever was typed while this was in flight stays; everything else is the server's.
+          drafts[id] = { ...fresh, subject: cur.subject, body: cur.body };
+          draftSeq[id] = ++seq;
+          cardError(id, "");
+          renderRowStatuses();
+          return true;
+        } catch (err) {
+          draftDirty.add(id);
+          cardError(id, "Couldn't save your edit: " + err.message);
+          return false;
+        }
+      }
+
+      async function saveToGmail(id) {
+        if (savingIds.has(id) || !drafts[id]) return false;
+        savingIds.add(id);
+        cardError(id, "");
+        try {
+          if (!(await flushDraft(id))) throw new Error("Your latest edit isn't saved yet, so the draft wasn't sent to Gmail. Try again.");
+          const d = await api("POST", `/api/outreach/drafts/${encodeURIComponent(id)}/save`);
+          const cur = drafts[id];
+          drafts[id] = cur && draftDirty.has(id) ? { ...d, subject: cur.subject, body: cur.body } : d;
+          draftSeq[id] = ++seq;
+          return true;
+        } catch (err) {
+          cardErrors[id] = err.message;
+          return false;
+        } finally {
+          savingIds.delete(id);
+          updateCard(id);
+          renderRowStatuses();
+          syncButtons();
+        }
+      }
+
+      $("or-save-all").addEventListener("click", async (e) => {
+        e.preventDefault();
+        if (savingAll) return;
+        const ids = rows.map((r) => r.id).filter((id) => id && drafts[id] && drafts[id].status === "ready");
+        if (!ids.length) return;
+        savingAll = true;
+        syncButtons();
+        let ok = 0;
+        const note = $("or-save-progress");
+        for (const id of ids) {
+          note.textContent = `Saved ${ok} of ${ids.length}…`;
+          if (await saveToGmail(id)) ok++;
+        }
+        savingAll = false;
+        note.textContent = ok === ids.length
+          ? `Saved ${ok} of ${ids.length}`
+          : `Saved ${ok} of ${ids.length} — the others show why below.`;
+        syncButtons();
+      });
+
+      function syncButtons() {
+        const claudeOff = !!(status && status.claude && status.claude.available === false);
+        const gen = $("or-generate");
+        gen.disabled = running || claudeOff;
+        gen.title = claudeOff ? (status.claude.message || "Claude Code isn't available.") : "";
+        $("or-stop").hidden = !running;
+        $("or-stop").disabled = stopRequested;
+        const ready = rows.some((r) => r.id && drafts[r.id] && drafts[r.id].status === "ready");
+        const all = $("or-save-all");
+        all.disabled = savingAll || !canDraft() || !ready;
+        all.title = canDraft() ? "" : gmailWhy();
+        Object.keys(cards).forEach(updateCard);
+      }
+
+      // -- loading --------------------------------------------------------------------------
+      function load() {
+        if (loaded) return Promise.resolve();
+        if (loading) return loading;
+        loading = (async () => {
+          try {
+            const state = await api("GET", "/api/outreach");
+            rows = (state.rows || []).map(newRow);
+            if (!rows.length) rows.push(newRow());
+            template = state.template || "";
+            attachResume = state.attach_resume !== false;
+            resume = state.resume || null;
+            drafts = state.drafts || {};
+            $("or-template").value = template;
+            renderResume();
+            renderGrid();
+            renderDrafts();
+            showErr($("or-load-err"), "");
+            $("or-loading").hidden = true;
+            $("or-body").hidden = false;
+            loaded = true;
+          } catch (err) {
+            $("or-loading").hidden = true;
+            showErr($("or-load-err"), "Couldn't load Outreach: " + err.message);
+          } finally {
+            loading = null;
+          }
+        })();
+        return loading;
+      }
+
+      function visible() {
+        return !$("view-outreach").hidden;
+      }
+
+      // The Google consent screen opens in the system browser and Claude Code is set up in a
+      // terminal, so coming back to the window is when either is likely to have changed.
+      window.addEventListener("focus", () => { if (visible()) refreshStatus(); });
+      // Best effort: the debounce may still be pending when the window goes away.
+      window.addEventListener("pagehide", () => {
+        if (dirty) save();
+        Object.keys(draftTimers).forEach(flushDraft);
+      });
+
+      return {
+        onShow() {
+          load();
+          refreshStatus();
+        },
+      };
+    })();
+
+    // -- tabs --
+    const TAB_KEY = "tempo.tab";
+
+    function showTab(name) {
+      if (name !== "outreach") name = "chat";
+      document.getElementById("view-chat").hidden = name !== "chat";
+      document.getElementById("view-outreach").hidden = name !== "outreach";
+      document.querySelectorAll(".tab").forEach((t) => {
+        const on = t.dataset.tab === name;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* storage unavailable; the tab just isn't remembered */ }
+      if (name === "outreach") outreach.onShow();
+    }
+
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", (e) => {
+        e.preventDefault();
+        showTab(t.dataset.tab);
+      });
+    });
+
+    let savedTab = "chat";
+    try { savedTab = localStorage.getItem(TAB_KEY) || "chat"; } catch (e) { /* storage unavailable */ }
+    showTab(savedTab);
 
     refreshStatus();
     populateModels();

@@ -78,3 +78,18 @@ class TestPortSelection:
             port = s.getsockname()[1]
             assert config.port_is_free("127.0.0.1", port) is False
         assert config.port_is_free("127.0.0.1", port) is True
+
+
+def test_file_inputs_get_a_picker():
+    """WKWebView shows nothing for <input type="file"> unless the UI delegate runs a panel.
+
+    The method also has to carry its explicit block signature: if pyobjc hands WebKit's
+    completion handler over unsigned, calling it raises inside a WebKit callback and the app
+    dies the moment someone picks a file.
+    """
+    delegate = shell.TempoWebDelegate.alloc().initWithOnQuit_(lambda: None)
+    selector = b"webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
+    assert delegate.respondsToSelector_(selector)
+    method = delegate.methodForSelector_(selector)
+    assert method is not None
+    assert shell._OPEN_PANEL_SIGNATURE == b"v@:@@@@?<v@?@>"

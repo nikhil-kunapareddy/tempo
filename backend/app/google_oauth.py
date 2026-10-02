@@ -1,6 +1,8 @@
 """Google OAuth 2.0 (authorization-code + refresh). Connect once via the browser; we store a
 refresh token and mint fresh access tokens on demand, so the calendar tools never need a
-hand-pasted token again. Client credentials come from env (GOOGLE_CLIENT_ID/SECRET)."""
+hand-pasted token again. Client credentials come from env (GOOGLE_CLIENT_ID/SECRET).
+
+One sign-in covers both Google features: the calendar tools and Outreach's Gmail drafts."""
 
 from __future__ import annotations
 
@@ -14,8 +16,12 @@ from . import config
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-# Least privilege: read + create events (covers list/get/create on the primary calendar).
-SCOPES = "https://www.googleapis.com/auth/calendar.events"
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+# Least privilege: read + create events (covers list/get/create on the primary calendar), and
+# create/update Gmail drafts for Outreach. gmail.compose would also allow sending; Tempo only
+# ever calls the drafts endpoints and never reads or sends mail.
+SCOPES = f"{CALENDAR_SCOPE} {GMAIL_COMPOSE_SCOPE}"
 
 
 def build_auth_url(state: str) -> str:
@@ -72,7 +78,26 @@ def store_tokens(token: dict[str, Any]) -> None:
         updates["google_token_expiry"] = time.time() + float(token.get("expires_in", 3600))
     if token.get("refresh_token"):
         updates["google_refresh_token"] = token["refresh_token"]
+    if token.get("scope"):
+        # What the user actually granted (they can untick Gmail on the consent screen). Not a
+        # secret, so it lives in settings.json; refreshes report it too.
+        updates["google_scopes"] = token["scope"]
     config.save_settings(updates)
+
+
+def granted_scopes() -> set[str]:
+    return set(str(config.load_settings().get("google_scopes") or "").split())
+
+
+def is_connected() -> bool:
+    s = config.load_settings()
+    return bool(s.get("google_refresh_token") or s.get("google_access_token"))
+
+
+def can_draft() -> bool:
+    """Connected with gmail.compose granted. Tokens from before Outreach have no recorded
+    scopes, so they read as False until the user reconnects."""
+    return is_connected() and GMAIL_COMPOSE_SCOPE in granted_scopes()
 
 
 def get_valid_access_token() -> str:
@@ -98,4 +123,4 @@ def get_valid_access_token() -> str:
 
 
 def disconnect() -> None:
-    config.forget(["google_access_token", "google_token_expiry", "google_refresh_token"])
+    config.forget(["google_access_token", "google_token_expiry", "google_refresh_token", "google_scopes"])
